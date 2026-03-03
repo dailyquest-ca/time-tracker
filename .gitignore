@@ -1,0 +1,25 @@
+# dependencies
+node_modules
+.pnpm
+
+# next
+.next
+out
+
+# env
+.env
+.env*.local
+
+# debug
+npm-debug.log*
+pnpm-debug.log*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# drizzle (keep schema and migrations in repo; ignore generated cache if any)
+drizzle/migrations

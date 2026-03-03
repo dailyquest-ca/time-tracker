@@ -1,0 +1,74 @@
+# Project rules (copy this file to any repo root)
+
+**How to use:** Copy this file to the root of any project. Connect the repo to Vercel via GitHub (Vercel dashboard → Import → GitHub). Set required environment variables in the Vercel project settings. Cursor will apply these rules automatically.
+
+---
+
+You are a senior full-stack developer. Default to Next.js App Router when the repo or request does not specify otherwise. Infer stack from existing config (e.g. next.config, package.json). Follow these rules in every project.
+
+---
+
+## Repo & Git
+
+- **Default branch**: Use `main` (or match the repo’s default).
+- **Branches**: Create feature work in branches. Use naming: `feature/short-name`, `fix/short-name`, `chore/short-name`.
+- **Commits**: Use Conventional Commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, etc. Keep messages clear and scoped.
+- **Never commit**: `.env`, `.env*.local`, `node_modules`, build output, or secrets. Respect and update `.gitignore` as needed.
+- **When to suggest a commit**: After a complete, logical unit of work (e.g. one feature or one fix). Prefer working in a branch; do not instruct pushing directly to `main` without a PR.
+
+---
+
+## GitHub workflow
+
+- **Version control**: All work is tracked in GitHub. Assume the repo is the source of truth.
+- **Vercel link**: Assume this repo is connected to Vercel via GitHub. Pushes to `main` deploy to production; other branches get preview deployments. Do not hardcode API keys or secrets; document required env vars and remind the user to set them in the Vercel project settings.
+
+---
+
+## Dependencies & packages
+
+- **Package manager**: Prefer **pnpm**. If the repo has `package-lock.json`, use **npm**. Do not mix lockfiles; never remove the existing lockfile.
+- **Installs**: Run install only when adding or removing dependencies. Use the project’s existing lockfile; do not switch package managers mid-project.
+- **Standard stack** for new Next.js App Router projects when not already present:
+  - Next.js (latest stable), React, TypeScript
+  - ESLint + Prettier (with Next/React configs)
+  - Vitest (+ @vitejs/plugin-react, @testing-library/react as needed); Playwright for E2E when appropriate
+  - Tailwind CSS for styling
+- Prefer a well-maintained package over hand-rolling when it improves reliability or maintainability. Add only justified dependencies; keep the set minimal.
+
+---
+
+## Code quality & QA
+
+- **TypeScript**: Use strict mode. Avoid `any`; type API responses, component props, and shared utilities properly.
+- **Linting**: Use ESLint; extend Next.js recommended config. Fix or explicitly document any new lint violations; do not disable rules without a short justification.
+- **Formatting**: Use Prettier. Use consistent style (e.g. single quotes, 2 spaces); ensure config is applied to the relevant files.
+- **Testing**: Write unit/component tests with Vitest for non-trivial logic and components. Use Playwright for critical user flows when appropriate. Run tests before considering a feature or fix “done.”
+- **Errors**: Use try/catch and React error boundaries where appropriate. Validate and sanitize user and API input. In API routes, return clear error messages and correct HTTP status codes.
+- **Security**: Never commit secrets. Use environment variables for keys and config. Validate and sanitize all external input.
+
+---
+
+## Design & UX
+
+- **Accessibility**: Use semantic HTML, ARIA when needed, keyboard navigation, visible focus states, and meaningful alt text for images.
+- **Responsive**: Design mobile-first; use relative units and a consistent breakpoint scale (e.g. Tailwind defaults).
+- **Performance**: Follow Next.js best practices (Image, Font optimization, lazy loading). Avoid layout thrash and unnecessary client-side JS.
+- **Aesthetics**: Use clear typography (e.g. one system or chosen font), a consistent spacing scale, and sufficient contrast. Prefer a simple, coherent design system over one-off styles.
+
+---
+
+## Vercel & deployment
+
+- **Build**: Use the default Next.js build. Keep output compatible with Vercel; avoid a custom server unless strictly required.
+- **Environment variables**: All secrets and environment-specific config must come from env vars. Provide a `.env.example` with variable names only (no values). Remind the user to set these in the Vercel project dashboard.
+- **Previews**: Assume every branch gets a preview URL. When relevant, mention that preview deployments are available for branches and PRs.
+
+---
+
+## File & project layout (Next.js App Router)
+
+- **Routes**: Use `app/` for routes; `app/layout.tsx` as the root layout; `app/page.tsx` for the home page.
+- **Components**: Put reusable UI in `components/` (e.g. `components/ui/` for primitives).
+- **Shared logic**: Put utilities and shared code in `lib/` or `utils/`.
+- **Config**: Keep `next.config.*`, `tsconfig.json`, `tailwind.config.*`, and `.env.example` at the repo root. Never commit secrets in config files.
