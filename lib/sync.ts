@@ -118,18 +118,28 @@ export async function runSync(): Promise<{
             date: dateKey,
             projectId: task.projectId,
             projectName,
+            taskTitle: task.title ?? null,
             tags: task.tags ?? [],
             category,
             durationMinutes,
+            source: 'ticktick',
+            startAt: task.startDate ? new Date(task.startDate) : null,
+            endAt: task.dueDate ? new Date(task.dueDate) : null,
+            completedAt: task.completedTime ? new Date(task.completedTime) : null,
           })
           .onConflictDoUpdate({
             target: [workSegments.ticktickTaskId, workSegments.date],
             set: {
               projectId: task.projectId,
               projectName,
+              taskTitle: task.title ?? null,
               tags: task.tags ?? [],
               category,
               durationMinutes,
+              source: 'ticktick',
+              startAt: task.startDate ? new Date(task.startDate) : null,
+              endAt: task.dueDate ? new Date(task.dueDate) : null,
+              completedAt: task.completedTime ? new Date(task.completedTime) : null,
               syncedAt: new Date(),
             },
           });

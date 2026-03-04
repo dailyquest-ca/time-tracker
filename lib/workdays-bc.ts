@@ -1,11 +1,9 @@
 /**
- * BC work days: Monday–Friday excluding BC statutory holidays (WorkSafeBC / BC Employment Standards).
- * Used for overtime: only these days count toward the 8-hour standard and balance.
+ * BC work days: Monday-Friday excluding BC statutory holidays (WorkSafeBC / BC Employment Standards).
+ * Fixed-date holidays use observed-day rules: if the actual date falls on Saturday,
+ * the observed holiday is the preceding Friday; if Sunday, the following Monday.
  */
 
-/**
- * Returns Easter Sunday (noon UTC) for the given year (Anonymous Gregorian).
- */
 function easterSunday(year: number): Date {
   const a = year % 19;
   const b = Math.floor(year / 100);
@@ -24,74 +22,65 @@ function easterSunday(year: number): Date {
   return new Date(Date.UTC(year, month, day, 12, 0, 0));
 }
 
-/**
- * BC statutory holidays for a given year. Returns YYYY-MM-DD strings.
- */
+/** Shift a fixed-date holiday to the observed weekday (Sat->Fri, Sun->Mon). */
+function observed(year: number, month: number, day: number): string {
+  const d = new Date(Date.UTC(year, month, day, 12, 0, 0));
+  const dow = d.getUTCDay();
+  if (dow === 6) d.setUTCDate(d.getUTCDate() - 1); // Sat -> Fri
+  if (dow === 0) d.setUTCDate(d.getUTCDate() + 1); // Sun -> Mon
+  return d.toISOString().slice(0, 10);
+}
+
+function nthMondayOf(year: number, month: number, n: number): string {
+  const d = new Date(Date.UTC(year, month, 1, 12, 0, 0));
+  const dow = d.getUTCDay();
+  const firstMon = dow <= 1 ? 1 + (1 - dow) : 1 + (8 - dow);
+  const target = firstMon + (n - 1) * 7;
+  return new Date(Date.UTC(year, month, target, 12, 0, 0)).toISOString().slice(0, 10);
+}
+
 function bcStatutoryHolidays(year: number): string[] {
   const dates: string[] = [];
 
-  // New Year's Day - Jan 1
-  dates.push(`${year}-01-01`);
+  // New Year's Day (observed)
+  dates.push(observed(year, 0, 1));
 
-  // Family Day - 3rd Monday in February
-  const feb3Mon = (() => {
-    const d = new Date(Date.UTC(year, 1, 1, 12, 0, 0));
-    const day = d.getUTCDay();
-    const toMon = day === 0 ? 1 : day === 1 ? 0 : 8 - day;
-    d.setUTCDate(1 + toMon + 14);
-    return d.toISOString().slice(0, 10);
-  })();
-  dates.push(feb3Mon);
+  // Family Day - 3rd Monday in February (always a Monday)
+  dates.push(nthMondayOf(year, 1, 3));
 
-  // Good Friday - Friday before Easter
+  // Good Friday (always a Friday)
   const easter = easterSunday(year);
-  const goodFriday = new Date(easter);
-  goodFriday.setUTCDate(easter.getUTCDate() - 2);
-  dates.push(goodFriday.toISOString().slice(0, 10));
+  const gf = new Date(easter);
+  gf.setUTCDate(easter.getUTCDate() - 2);
+  dates.push(gf.toISOString().slice(0, 10));
 
-  // Victoria Day - Monday on or before May 24 (last Mon before May 25)
+  // Victoria Day - last Monday on or before May 24 (always a Monday)
   const may24 = new Date(Date.UTC(year, 4, 24, 12, 0, 0));
-  const may24Day = may24.getUTCDay();
-  const vicOffset = may24Day === 0 ? -6 : 1 - may24Day;
-  const victoria = new Date(may24);
-  victoria.setUTCDate(24 + vicOffset);
-  dates.push(victoria.toISOString().slice(0, 10));
+  const may24Dow = may24.getUTCDay();
+  const vicOff = may24Dow === 0 ? -6 : 1 - may24Dow;
+  const vic = new Date(Date.UTC(year, 4, 24 + vicOff, 12, 0, 0));
+  dates.push(vic.toISOString().slice(0, 10));
 
-  // Canada Day - Jul 1
-  dates.push(`${year}-07-01`);
+  // Canada Day (observed)
+  dates.push(observed(year, 6, 1));
 
-  // BC Day - 1st Monday in August
-  const aug1 = new Date(Date.UTC(year, 7, 1, 12, 0, 0));
-  const aug1Day = aug1.getUTCDay();
-  const bcOffset = aug1Day === 0 ? 1 : aug1Day === 1 ? 0 : 8 - aug1Day;
-  const bcDay = new Date(aug1);
-  bcDay.setUTCDate(1 + bcOffset);
-  dates.push(bcDay.toISOString().slice(0, 10));
+  // BC Day - 1st Monday in August (always a Monday)
+  dates.push(nthMondayOf(year, 7, 1));
 
-  // Labour Day - 1st Monday in September
-  const sep1 = new Date(Date.UTC(year, 8, 1, 12, 0, 0));
-  const sep1Day = sep1.getUTCDay();
-  const labOffset = sep1Day === 0 ? 1 : sep1Day === 1 ? 0 : 8 - sep1Day;
-  const labour = new Date(sep1);
-  labour.setUTCDate(1 + labOffset);
-  dates.push(labour.toISOString().slice(0, 10));
+  // Labour Day - 1st Monday in September (always a Monday)
+  dates.push(nthMondayOf(year, 8, 1));
 
-  // National Day for Truth and Reconciliation - Sep 30
-  dates.push(`${year}-09-30`);
+  // National Day for Truth and Reconciliation (observed)
+  dates.push(observed(year, 8, 30));
 
-  // Thanksgiving - 2nd Monday in October
-  const oct1 = new Date(Date.UTC(year, 9, 1, 12, 0, 0));
-  const oct1Day = oct1.getUTCDay();
-  const thxFirstMonOffset = oct1Day === 0 ? 1 : oct1Day === 1 ? 0 : 8 - oct1Day;
-  const thxSecondMon = new Date(oct1);
-  thxSecondMon.setUTCDate(1 + thxFirstMonOffset + 7);
-  dates.push(thxSecondMon.toISOString().slice(0, 10));
+  // Thanksgiving - 2nd Monday in October (always a Monday)
+  dates.push(nthMondayOf(year, 9, 2));
 
-  // Remembrance Day - Nov 11
-  dates.push(`${year}-11-11`);
+  // Remembrance Day (observed)
+  dates.push(observed(year, 10, 11));
 
-  // Christmas - Dec 25
-  dates.push(`${year}-12-25`);
+  // Christmas Day (observed)
+  dates.push(observed(year, 11, 25));
 
   return dates;
 }
@@ -107,12 +96,12 @@ function getHolidaySet(year: number): Set<string> {
 
 /**
  * Returns true if the given date (YYYY-MM-DD) is a BC work day:
- * Monday–Friday and not a BC statutory holiday.
+ * Monday-Friday and not an observed BC statutory holiday.
  */
 export function isBCWorkDay(dateKey: string): boolean {
   const d = new Date(dateKey + 'T12:00:00Z');
-  const day = d.getUTCDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
-  if (day === 0 || day === 6) return false;
+  const dow = d.getUTCDay();
+  if (dow === 0 || dow === 6) return false;
   const year = d.getUTCFullYear();
   const holidays = getHolidaySet(year);
   return !holidays.has(dateKey);

@@ -1,18 +1,13 @@
 /**
  * Backfill historical hours from CSV exports into the database.
  *
- * Usage:
- *   npm run backfill
+ * Usage: npm run backfill
  *
- * CSV format expected:
- *   Date, [Category columns...], Daily Total, Overtime, Notes
- *
- * Skipped rows: "Date", "Header", "OVERALL TOTALS", "Leftover time from 2025",
- *               rows where Date is empty, rows where all category hours are 0.
- *
- * Duplicate dates (multiple rows for the same day) are summed per category.
- * Durations are rounded to the nearest 15 minutes.
- * Synthetic ticktick_task_ids are used: backfill-{date}-c{colIndex}
+ * Features:
+ * - Populates taskTitle from Notes column (best-effort per category)
+ * - Uses observed BC statutory holidays (matching lib/workdays-bc.ts)
+ * - Validates computed totals against CSV "Daily Total" column
+ * - Marks source as 'backfill'
  */
 
 import * as dotenv from 'dotenv';
@@ -33,7 +28,7 @@ import {
   unique,
 } from 'drizzle-orm/pg-core';
 
-// ── inline schema so we don't depend on Next.js module resolution ─────────────
+// ── Inline schema ────────────────────────────────────────────────────────────
 
 const workSegments = pgTable(
   'work_segments',
@@ -43,9 +38,11 @@ const workSegments = pgTable(
     date: text('date').notNull(),
     projectId: text('project_id'),
     projectName: text('project_name'),
+    taskTitle: text('task_title'),
     tags: jsonb('tags').$type<string[]>().default([]),
     category: text('category').notNull(),
     durationMinutes: integer('duration_minutes').notNull(),
+    source: text('source').default('ticktick'),
     syncedAt: timestamp('synced_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique().on(t.ticktickTaskId, t.date)]
@@ -64,7 +61,7 @@ const dailyTotals = pgTable('daily_totals', {
     .defaultNow(),
 });
 
-// ── DB setup ─────────────────────────────────────────────────────────────────
+// ── DB ───────────────────────────────────────────────────────────────────────
 
 const connectionString = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
 if (!connectionString) {
@@ -74,7 +71,7 @@ if (!connectionString) {
 const pool = createPool({ connectionString });
 const db = drizzle(pool, { schema: { workSegments, dailyTotals } });
 
-// ── BC statutory holidays ────────────────────────────────────────────────────
+// ── BC observed holidays (same logic as lib/workdays-bc.ts) ──────────────────
 
 function easterSunday(year: number): Date {
   const a = year % 19, b = Math.floor(year / 100), c = year % 100;
@@ -85,77 +82,43 @@ function easterSunday(year: number): Date {
   const m = Math.floor((a + 11 * h + 22 * l) / 451);
   const month = Math.floor((h + l - 7 * m + 114) / 31) - 1;
   const day = ((h + l - 7 * m + 114) % 31) + 1;
-  return new Date(Date.UTC(year, month, day));
+  return new Date(Date.UTC(year, month, day, 12, 0, 0));
 }
 
-function nthWeekdayOfMonth(year: number, month: number, weekday: number, n: number): string {
-  let count = 0;
-  for (let d = 1; d <= 31; d++) {
-    const date = new Date(Date.UTC(year, month, d));
-    if (date.getMonth() !== month) break;
-    if (date.getUTCDay() === weekday) {
-      count++;
-      if (count === n) return date.toISOString().slice(0, 10);
-    }
-  }
-  return '';
+function observed(year: number, month: number, day: number): string {
+  const d = new Date(Date.UTC(year, month, day, 12, 0, 0));
+  const dow = d.getUTCDay();
+  if (dow === 6) d.setUTCDate(d.getUTCDate() - 1);
+  if (dow === 0) d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
 }
 
-function lastWeekdayOnOrBefore(year: number, month: number, dayOfMonth: number, weekday: number): string {
-  for (let d = dayOfMonth; d >= dayOfMonth - 6; d--) {
-    const date = new Date(Date.UTC(year, month, d));
-    if (date.getUTCDay() === weekday) return date.toISOString().slice(0, 10);
-  }
-  return '';
+function nthMondayOf(year: number, month: number, n: number): string {
+  const d = new Date(Date.UTC(year, month, 1, 12, 0, 0));
+  const dow = d.getUTCDay();
+  const firstMon = dow <= 1 ? 1 + (1 - dow) : 1 + (8 - dow);
+  return new Date(Date.UTC(year, month, firstMon + (n - 1) * 7, 12, 0, 0)).toISOString().slice(0, 10);
 }
 
 function bcHolidays(year: number): Set<string> {
   const dates: string[] = [];
-
-  // New Year's Day
-  dates.push(`${year}-01-01`);
-
-  // Family Day – 3rd Monday in February
-  const feb3Mon = (() => {
-    const d = new Date(Date.UTC(year, 1, 1, 12, 0, 0));
-    const day = d.getUTCDay();
-    const toMon = day === 0 ? 1 : day === 1 ? 0 : 8 - day;
-    d.setUTCDate(1 + toMon + 14);
-    return d.toISOString().slice(0, 10);
-  })();
-  dates.push(feb3Mon);
-
-  // Good Friday
+  dates.push(observed(year, 0, 1));
+  dates.push(nthMondayOf(year, 1, 3));
   const easter = easterSunday(year);
-  const goodFriday = new Date(easter);
-  goodFriday.setUTCDate(easter.getUTCDate() - 2);
-  dates.push(goodFriday.toISOString().slice(0, 10));
-
-  // Victoria Day – last Monday on or before May 24
-  dates.push(lastWeekdayOnOrBefore(year, 4, 24, 1));
-
-  // Canada Day
-  dates.push(`${year}-07-01`);
-
-  // BC Day – 1st Monday in August
-  dates.push(nthWeekdayOfMonth(year, 7, 1, 1));
-
-  // Labour Day – 1st Monday in September
-  dates.push(nthWeekdayOfMonth(year, 8, 1, 1));
-
-  // National Day for Truth and Reconciliation
-  dates.push(`${year}-09-30`);
-
-  // Thanksgiving – 2nd Monday in October
-  dates.push(nthWeekdayOfMonth(year, 9, 1, 2));
-
-  // Remembrance Day
-  dates.push(`${year}-11-11`);
-
-  // Christmas
-  dates.push(`${year}-12-25`);
-
-  return new Set(dates.filter(Boolean));
+  const gf = new Date(easter); gf.setUTCDate(easter.getUTCDate() - 2);
+  dates.push(gf.toISOString().slice(0, 10));
+  const may24 = new Date(Date.UTC(year, 4, 24, 12, 0, 0));
+  const may24Dow = may24.getUTCDay();
+  const vicOff = may24Dow === 0 ? -6 : 1 - may24Dow;
+  dates.push(new Date(Date.UTC(year, 4, 24 + vicOff, 12, 0, 0)).toISOString().slice(0, 10));
+  dates.push(observed(year, 6, 1));
+  dates.push(nthMondayOf(year, 7, 1));
+  dates.push(nthMondayOf(year, 8, 1));
+  dates.push(observed(year, 8, 30));
+  dates.push(nthMondayOf(year, 9, 2));
+  dates.push(observed(year, 10, 11));
+  dates.push(observed(year, 11, 25));
+  return new Set(dates);
 }
 
 const holidayCache = new Map<number, Set<string>>();
@@ -168,7 +131,7 @@ function isBCWorkDay(dateKey: string): boolean {
   return !holidayCache.get(year)!.has(dateKey);
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function roundToNearest15(minutes: number): number {
   return Math.max(0, Math.round(minutes / 15) * 15);
@@ -199,53 +162,76 @@ const MONTH_MAP: Record<string, number> = {
 };
 
 function parseDateStr(s: string): string | null {
-  // "Apr 21 2025" → "2025-04-21"
   const parts = s.trim().split(/\s+/);
   if (parts.length !== 3) return null;
   const month = MONTH_MAP[parts[0]];
   const day = parseInt(parts[1], 10);
   const year = parseInt(parts[2], 10);
   if (month === undefined || isNaN(day) || isNaN(year)) return null;
-  const mm = String(month + 1).padStart(2, '0');
-  const dd = String(day).padStart(2, '0');
-  return `${year}-${mm}-${dd}`;
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-// Rows to skip
 const SKIP_DATE_VALUES = new Set([
   'date', 'header', 'overall totals', 'leftover time from 2025',
 ]);
 
-// ── CSV parsing ───────────────────────────────────────────────────────────────
+// ── CSV parsing (now extracts notes for task titles) ─────────────────────────
+
+interface CatEntry {
+  minutes: number;
+  taskTitle: string;
+}
 
 interface DayEntry {
-  date: string; // YYYY-MM-DD
-  categories: Record<string, number>; // name → minutes (already summed for dup dates)
+  date: string;
+  categories: Record<string, CatEntry>;
+  csvDailyTotal: number;
+}
+
+/**
+ * Extract task titles from the Notes column for a specific category.
+ * Notes format: "Category - Task Name, Category - Other Task"
+ */
+function extractTaskTitle(notes: string, catName: string): string {
+  if (!notes) return 'Backfill';
+  const parts = notes.split(/,\s*/);
+  const matches: string[] = [];
+  for (const part of parts) {
+    if (part.includes(catName) || part.startsWith(catName)) {
+      const after = part.replace(new RegExp(`^.*?${catName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[-–:]\\s*`), '');
+      if (after && after !== part) {
+        matches.push(after.trim());
+      }
+    }
+  }
+  return matches.length > 0 ? matches.join('; ') : 'Backfill';
 }
 
 function parseCsv(filePath: string): DayEntry[] {
   const content = readFileSync(filePath, 'utf-8');
   const lines = content.split(/\r?\n/).filter((l) => l.trim());
-
   if (lines.length < 2) return [];
 
   const headerCols = parseCSVLine(lines[0]);
-  // Category columns are indices 1 through (last 3 columns = Daily Total, Overtime, Notes)
   const catCols = headerCols.slice(1, headerCols.length - 3);
+  const dailyTotalIdx = headerCols.length - 3; // "Daily Total" column
+  const notesIdx = headerCols.length - 1; // "Notes" column
 
-  const byDate = new Map<string, Record<string, number>>();
+  const byDate = new Map<string, { categories: Record<string, CatEntry>; csvTotal: number }>();
 
   for (let i = 1; i < lines.length; i++) {
     const cols = parseCSVLine(lines[i]);
     const rawDate = cols[0] ?? '';
-
     if (!rawDate || SKIP_DATE_VALUES.has(rawDate.trim().toLowerCase())) continue;
-
     const dateKey = parseDateStr(rawDate);
     if (!dateKey) continue;
 
-    if (!byDate.has(dateKey)) byDate.set(dateKey, {});
+    const notes = cols[notesIdx] ?? '';
+    const csvTotal = parseFloat(cols[dailyTotalIdx] ?? '') || 0;
+
+    if (!byDate.has(dateKey)) byDate.set(dateKey, { categories: {}, csvTotal: 0 });
     const entry = byDate.get(dateKey)!;
+    entry.csvTotal += csvTotal;
 
     for (let c = 0; c < catCols.length; c++) {
       const catName = catCols[c].trim();
@@ -256,20 +242,31 @@ function parseCsv(filePath: string): DayEntry[] {
       if (isNaN(hours) || hours <= 0) continue;
       const minutes = roundToNearest15(hours * 60);
       if (minutes > 0) {
-        entry[catName] = (entry[catName] ?? 0) + minutes;
+        if (!entry.categories[catName]) {
+          entry.categories[catName] = { minutes: 0, taskTitle: '' };
+        }
+        entry.categories[catName].minutes += minutes;
+        const title = extractTaskTitle(notes, catName);
+        if (title !== 'Backfill' && !entry.categories[catName].taskTitle) {
+          entry.categories[catName].taskTitle = title;
+        }
       }
     }
   }
 
   return Array.from(byDate.entries())
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, categories]) => ({ date, categories }));
+    .map(([date, val]) => ({
+      date,
+      categories: val.categories,
+      csvDailyTotal: val.csvTotal,
+    }));
 }
 
-// ── Recompute daily totals ────────────────────────────────────────────────────
+// ── Recompute daily totals (observed holidays) ───────────────────────────────
 
 async function recompute(minDate: string, maxDate: string) {
-  const MINUTES_PER_STANDARD_DAY = 8 * 60;
+  const STD = 8 * 60;
 
   const segments = await db
     .select()
@@ -285,17 +282,10 @@ async function recompute(minDate: string, maxDate: string) {
     rec.byCategory[cat] = (rec.byCategory[cat] ?? 0) + s.durationMinutes;
   }
 
-  // Get running overtime balance from before our range
-  const existing = await db
-    .select()
-    .from(dailyTotals)
-    .where(lt(dailyTotals.date, minDate));
+  const existing = await db.select().from(dailyTotals).where(lt(dailyTotals.date, minDate));
   existing.sort((a, b) => a.date.localeCompare(b.date));
-  let runningOvertime = existing.length > 0
-    ? existing[existing.length - 1].overtimeBalanceAfter
-    : 0;
+  let runningOT = existing.length > 0 ? existing[existing.length - 1].overtimeBalanceAfter : 0;
 
-  // Walk every calendar day in range
   const allDates: string[] = [];
   const end = new Date(maxDate + 'T12:00:00Z');
   for (let d = new Date(minDate + 'T12:00:00Z'); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
@@ -305,100 +295,91 @@ async function recompute(minDate: string, maxDate: string) {
   let written = 0;
   for (const dateKey of allDates) {
     const data = byDate.get(dateKey) ?? { total: 0, byCategory: {} };
-    const totalMinutes = data.total;
-
     if (isBCWorkDay(dateKey)) {
-      if (totalMinutes > MINUTES_PER_STANDARD_DAY) {
-        runningOvertime += totalMinutes - MINUTES_PER_STANDARD_DAY;
-      } else {
-        runningOvertime = Math.max(0, runningOvertime - (MINUTES_PER_STANDARD_DAY - totalMinutes));
-      }
+      if (data.total > STD) runningOT += data.total - STD;
+      else runningOT = Math.max(0, runningOT - (STD - data.total));
     } else {
-      runningOvertime += totalMinutes;
+      runningOT += data.total;
     }
-
     await db
       .insert(dailyTotals)
-      .values({
-        date: dateKey,
-        totalMinutes: data.total,
-        minutesByCategory: data.byCategory,
-        overtimeBalanceAfter: runningOvertime,
-        updatedAt: new Date(),
-      })
+      .values({ date: dateKey, totalMinutes: data.total, minutesByCategory: data.byCategory, overtimeBalanceAfter: runningOT, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: dailyTotals.date,
-        set: {
-          totalMinutes: data.total,
-          minutesByCategory: data.byCategory,
-          overtimeBalanceAfter: runningOvertime,
-          updatedAt: new Date(),
-        },
+        set: { totalMinutes: data.total, minutesByCategory: data.byCategory, overtimeBalanceAfter: runningOT, updatedAt: new Date() },
       });
     written++;
   }
-  console.log(`  Recomputed ${written} daily total rows (overtime at end: ${(runningOvertime / 60).toFixed(2)}h)`);
+  console.log(`  Recomputed ${written} daily total rows (overtime at end: ${(runningOT / 60).toFixed(2)}h)`);
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
+// ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
   const csv2025 = 'C:\\Users\\zacha\\Downloads\\Overtime Logbook - 2025 Hours.csv';
   const csv2026 = 'C:\\Users\\zacha\\Downloads\\Overtime Logbook - 2026 Hours.csv';
 
-  console.log('Parsing CSV files…');
+  console.log('Parsing CSV files...');
   const entries2025 = parseCsv(csv2025);
   const entries2026 = parseCsv(csv2026);
   const allEntries = [...entries2025, ...entries2026].sort((a, b) => a.date.localeCompare(b.date));
-
-  console.log(`Found ${allEntries.length} unique days with hours (${entries2025.length} from 2025, ${entries2026.length} from 2026)`);
+  console.log(`Found ${allEntries.length} unique days (${entries2025.length} from 2025, ${entries2026.length} from 2026)`);
 
   let segmentsInserted = 0;
-  let segmentsSkipped = 0;
+  let mismatches = 0;
 
   for (const entry of allEntries) {
-    for (const [catName, minutes] of Object.entries(entry.categories)) {
-      if (minutes <= 0) continue;
+    let computedTotal = 0;
+    for (const [catName, catEntry] of Object.entries(entry.categories)) {
+      if (catEntry.minutes <= 0) continue;
+      computedTotal += catEntry.minutes;
 
-      // Build a stable synthetic task ID: backfill-{date}-{category-slug}
       const slug = catName.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40);
       const syntheticId = `backfill-${entry.date}-${slug}`;
+      const title = catEntry.taskTitle || 'Backfill';
 
-      try {
-        await db
-          .insert(workSegments)
-          .values({
-            ticktickTaskId: syntheticId,
-            date: entry.date,
-            projectId: `backfill-${slug}`,
+      await db
+        .insert(workSegments)
+        .values({
+          ticktickTaskId: syntheticId,
+          date: entry.date,
+          projectId: `backfill-${slug}`,
+          projectName: catName,
+          taskTitle: title,
+          tags: [],
+          category: catName,
+          durationMinutes: catEntry.minutes,
+          source: 'backfill',
+        })
+        .onConflictDoUpdate({
+          target: [workSegments.ticktickTaskId, workSegments.date],
+          set: {
             projectName: catName,
-            tags: [],
+            taskTitle: title,
             category: catName,
-            durationMinutes: minutes,
-          })
-          .onConflictDoUpdate({
-            target: [workSegments.ticktickTaskId, workSegments.date],
-            set: {
-              projectName: catName,
-              category: catName,
-              durationMinutes: minutes,
-              syncedAt: new Date(),
-            },
-          });
-        segmentsInserted++;
-      } catch (e) {
-        console.warn(`  Skipped ${syntheticId}:`, e instanceof Error ? e.message : e);
-        segmentsSkipped++;
-      }
+            durationMinutes: catEntry.minutes,
+            source: 'backfill',
+            syncedAt: new Date(),
+          },
+        });
+      segmentsInserted++;
+    }
+
+    // Validate against CSV daily total
+    const csvMins = roundToNearest15(entry.csvDailyTotal * 60);
+    if (csvMins > 0 && Math.abs(computedTotal - csvMins) > 15) {
+      console.warn(`  MISMATCH ${entry.date}: computed=${computedTotal}min vs CSV=${csvMins}min (delta=${computedTotal - csvMins})`);
+      mismatches++;
     }
   }
 
-  console.log(`Inserted/updated ${segmentsInserted} work segments (${segmentsSkipped} skipped).`);
+  console.log(`Inserted/updated ${segmentsInserted} work segments.`);
+  if (mismatches > 0) console.warn(`  ${mismatches} daily total mismatch(es) detected.`);
 
   if (allEntries.length > 0) {
     const minDate = allEntries[0].date;
-    const maxDate = new Date().toISOString().slice(0, 10); // through today
-    console.log(`Recomputing daily totals from ${minDate} to ${maxDate}…`);
+    const maxDate = new Date().toISOString().slice(0, 10);
+    console.log(`Recomputing daily totals from ${minDate} to ${maxDate}...`);
     await recompute(minDate, maxDate);
   }
 
