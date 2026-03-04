@@ -28,6 +28,28 @@ export async function GET(request: NextRequest) {
   const savedState = cookieStore.get('ticktick_oauth_state')?.value;
   cookieStore.delete('ticktick_oauth_state');
 
+  // #region agent log
+  const hasSavedState = !!savedState;
+  const stateMatch = state === savedState;
+  const logPayload = {
+    sessionId: 'bc99b6',
+    location: 'app/api/auth/ticktick/callback/route.ts:GET',
+    message: 'OAuth callback: state check',
+    data: {
+      stateFromUrlPrefix: state.slice(0, 8),
+      stateFromUrlLen: state.length,
+      savedStatePrefix: savedState?.slice(0, 8) ?? null,
+      savedStateLen: savedState?.length ?? 0,
+      hasSavedState,
+      stateMatch,
+      urlHost: request.nextUrl.host,
+    },
+    hypothesisId: 'H2',
+    timestamp: Date.now(),
+  };
+  fetch('http://127.0.0.1:7719/ingest/e3960d2d-b42f-45cd-97c1-02ec42cc4fbe', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'bc99b6' }, body: JSON.stringify(logPayload) }).catch(() => {});
+  // #endregion
+
   if (!savedState || state !== savedState) {
     return NextResponse.redirect(
       new URL('/settings?error=invalid_state', request.url)
@@ -51,7 +73,7 @@ export async function GET(request: NextRequest) {
       .values({
         userId: USER_ID,
         accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
+        refreshToken: tokens.refresh_token || null,
         expiresAt,
         updatedAt: new Date(),
       })
@@ -59,7 +81,7 @@ export async function GET(request: NextRequest) {
         target: ticktickTokens.userId,
         set: {
           accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
+          refreshToken: tokens.refresh_token || null,
           expiresAt,
           updatedAt: new Date(),
         },

@@ -7,12 +7,13 @@ import {
   unique,
 } from 'drizzle-orm/pg-core';
 
+/** Legacy type; categories are now free text (TickTick project names). */
 export type WorkCategory = 'work_project' | 'general_task' | 'meeting';
 
 export const ticktickTokens = pgTable('ticktick_tokens', {
   userId: text('user_id').primaryKey().default('default'),
   accessToken: text('access_token').notNull(),
-  refreshToken: text('refresh_token').notNull(),
+  refreshToken: text('refresh_token'), // nullable: TickTick may not always return one
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .notNull()
@@ -36,7 +37,7 @@ export const workSegments = pgTable(
     projectId: text('project_id'),
     projectName: text('project_name'),
     tags: jsonb('tags').$type<string[]>().default([]),
-    category: text('category').$type<WorkCategory>().notNull(),
+    category: text('category').notNull(),
     durationMinutes: integer('duration_minutes').notNull(),
     syncedAt: timestamp('synced_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -47,9 +48,9 @@ export const dailyTotals = pgTable('daily_totals', {
   date: text('date').primaryKey(),
   totalMinutes: integer('total_minutes').notNull().default(0),
   minutesByCategory: jsonb('minutes_by_category')
-    .$type<Record<WorkCategory, number>>()
+    .$type<Record<string, number>>()
     .notNull()
-    .default({ work_project: 0, general_task: 0, meeting: 0 }),
+    .default({}),
   overtimeBalanceAfter: integer('overtime_balance_after').notNull().default(0),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .notNull()

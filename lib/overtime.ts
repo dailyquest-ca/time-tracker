@@ -1,38 +1,15 @@
-import { and, eq, gte, lt, lte } from 'drizzle-orm';
+import { and, gte, lt, lte } from 'drizzle-orm';
 import { db } from './db';
-import {
-  appConfig,
-  dailyTotals,
-  workSegments,
-  type WorkCategory,
-} from './schema';
+import { dailyTotals, workSegments } from './schema';
+import { isBCWorkDay } from './workdays-bc';
 
 const MINUTES_PER_STANDARD_DAY = 8 * 60;
-const DEFAULT_WORK_DAYS = [1, 2, 3, 4, 5]; // Mon=1 .. Sun=7
 
 export interface DailyTotalRow {
   date: string;
   totalMinutes: number;
-  minutesByCategory: Record<WorkCategory, number>;
+  minutesByCategory: Record<string, number>;
   overtimeBalanceAfter: number;
-}
-
-async function getWorkDays(): Promise<number[]> {
-  const rows = await db
-    .select()
-    .from(appConfig)
-    .where(eq(appConfig.key, 'work_days'))
-    .limit(1);
-  if (rows.length === 0) return DEFAULT_WORK_DAYS;
-  const val = rows[0].value as unknown;
-  if (Array.isArray(val)) return val as number[];
-  return DEFAULT_WORK_DAYS;
-}
-
-function isWorkDay(dateKey: string, workDays: number[]): boolean {
-  const d = new Date(dateKey + 'T12:00:00Z');
-  const day = d.getUTCDay();
-  return workDays.includes(day === 0 ? 7 : day);
 }
 
 export async function getDailyTotalsInRange(
@@ -49,7 +26,7 @@ export async function getDailyTotalsInRange(
   return rows.map((r) => ({
     date: r.date,
     totalMinutes: r.totalMinutes,
-    minutesByCategory: r.minutesByCategory as Record<WorkCategory, number>,
+    minutesByCategory: (r.minutesByCategory ?? {}) as Record<string, number>,
     overtimeBalanceAfter: r.overtimeBalanceAfter,
   }));
 }
@@ -65,7 +42,6 @@ export async function recomputeDailyTotalsForDates(
   const sorted = [...dates].sort();
   const minDate = sorted[0];
   const maxDate = sorted[sorted.length - 1];
-  const workDays = await getWorkDays();
 
   const segments = await db
     .select()
@@ -78,19 +54,12 @@ export async function recomputeDailyTotalsForDates(
     );
   const byDate = new Map<
     string,
-    { total: number; byCategory: Record<WorkCategory, number> }
+    { total: number; byCategory: Record<string, number> }
   >();
   for (const s of segments) {
-    const cat = s.category as WorkCategory;
+    const cat = String(s.category ?? '');
     if (!byDate.has(s.date)) {
-      byDate.set(s.date, {
-        total: 0,
-        byCategory: {
-          work_project: 0,
-          general_task: 0,
-          meeting: 0,
-        },
-      });
+      byDate.set(s.date, { total: 0, byCategory: {} });
     }
     const rec = byDate.get(s.date)!;
     rec.total += s.durationMinutes;
@@ -118,15 +87,8 @@ export async function recomputeDailyTotalsForDates(
   }
 
   for (const dateKey of allDatesInRange) {
-    const data = byDate.get(dateKey) ?? {
-      total: 0,
-      byCategory: {
-        work_project: 0,
-        general_task: 0,
-        meeting: 0,
-      },
-    };
-    if (!isWorkDay(dateKey, workDays)) {
+    const data = byDate.get(dateKey) ?? { total: 0, byCategory: {} };
+    if (!isBCWorkDay(dateKey)) {
       continue;
     }
     const totalMinutes = data.total;

@@ -1,12 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db } from './db';
-import {
-  categoryMapping,
-  syncState,
-  ticktickTokens,
-  workSegments,
-  type WorkCategory,
-} from './schema';
+import { syncState, ticktickTokens, workSegments } from './schema';
 import {
   getProjects,
   getTasks,
@@ -19,15 +13,15 @@ import { recomputeDailyTotalsForDates } from './overtime';
 
 const USER_ID = 'default';
 
-export type CategoryMappingRow = {
-  type: 'project' | 'tag';
-  value: string;
-  category: WorkCategory;
-};
+/** Round duration to nearest 15 minutes (min 0). */
+function roundToNearest15(minutes: number): number {
+  if (minutes <= 0) return 0;
+  return Math.round(minutes / 15) * 15;
+}
 
 async function getStoredTokens(): Promise<{
   accessToken: string;
-  refreshToken: string;
+  refreshToken: string | null;
   expiresAt: Date;
 } | null> {
   const rows = await db
@@ -52,6 +46,9 @@ export async function getValidAccessToken(): Promise<string | null> {
   if (new Date(stored.expiresAt).getTime() - bufferMs > now.getTime()) {
     return stored.accessToken;
   }
+  if (!stored.refreshToken?.trim()) {
+    return null;
+  }
   const refreshed = await refreshAccessToken(stored.refreshToken);
   const expiresAt = new Date(
     Date.now() + (refreshed.expires_in || 3600) * 1000
@@ -60,38 +57,12 @@ export async function getValidAccessToken(): Promise<string | null> {
     .update(ticktickTokens)
     .set({
       accessToken: refreshed.access_token,
-      refreshToken: refreshed.refresh_token,
+      refreshToken: refreshed.refresh_token || null,
       expiresAt,
       updatedAt: new Date(),
     })
     .where(eq(ticktickTokens.userId, USER_ID));
   return refreshed.access_token;
-}
-
-export async function getCategoryMappings(): Promise<CategoryMappingRow[]> {
-  const rows = await db.select().from(categoryMapping);
-  return rows.map((r) => ({
-    type: r.type as 'project' | 'tag',
-    value: r.value,
-    category: r.category as WorkCategory,
-  }));
-}
-
-function resolveCategory(
-  projectId: string,
-  projectName: string,
-  tags: string[],
-  mappings: CategoryMappingRow[]
-): WorkCategory {
-  for (const m of mappings) {
-    if (m.type === 'project' && (m.value === projectId || m.value === projectName)) {
-      return m.category;
-    }
-    if (m.type === 'tag' && tags.includes(m.value)) {
-      return m.category;
-    }
-  }
-  return 'general_task';
 }
 
 export async function runSync(): Promise<{
@@ -113,10 +84,9 @@ export async function runSync(): Promise<{
     const modifiedSince =
       syncRow?.lastModifiedTime ?? new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
-    const [tasks, projects, mappings] = await Promise.all([
+    const [tasks, projects] = await Promise.all([
       getTasks(accessToken, { modifiedSince }),
       getProjects(accessToken),
-      getCategoryMappings(),
     ]);
 
     const projectMap = new Map(projects.map((p) => [p.id, p.name]));
@@ -126,13 +96,8 @@ export async function runSync(): Promise<{
       const dateKey = taskDateKey(task);
       if (isCompletedTaskWithDuration(task)) {
         const projectName = projectMap.get(task.projectId) ?? task.projectId;
-        const category = resolveCategory(
-          task.projectId,
-          projectName,
-          task.tags ?? [],
-          mappings
-        );
-        const durationMinutes = taskDurationMinutes(task);
+        const category = projectName;
+        const durationMinutes = roundToNearest15(taskDurationMinutes(task));
         affectedDates.add(dateKey);
         await db
           .insert(workSegments)

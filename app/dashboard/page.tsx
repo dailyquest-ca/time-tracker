@@ -3,12 +3,10 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
-type WorkCategory = 'work_project' | 'general_task' | 'meeting';
-
 interface DailyRow {
   date: string;
   totalMinutes: number;
-  minutesByCategory: Record<WorkCategory, number>;
+  minutesByCategory: Record<string, number>;
   overtimeBalanceAfter: number;
 }
 
@@ -166,13 +164,7 @@ export default function DashboardPage() {
                     Total
                   </th>
                   <th className="border border-gray-200 px-3 py-2 font-medium">
-                    Work project
-                  </th>
-                  <th className="border border-gray-200 px-3 py-2 font-medium">
-                    General tasks
-                  </th>
-                  <th className="border border-gray-200 px-3 py-2 font-medium">
-                    Meetings
+                    By category
                   </th>
                   <th className="border border-gray-200 px-3 py-2 font-medium">
                     Overtime (after)
@@ -189,13 +181,10 @@ export default function DashboardPage() {
                       {formatHours(row.totalMinutes)}
                     </td>
                     <td className="border border-gray-200 px-3 py-2">
-                      {formatHours(row.minutesByCategory.work_project)}
-                    </td>
-                    <td className="border border-gray-200 px-3 py-2">
-                      {formatHours(row.minutesByCategory.general_task)}
-                    </td>
-                    <td className="border border-gray-200 px-3 py-2">
-                      {formatHours(row.minutesByCategory.meeting)}
+                      {Object.entries(row.minutesByCategory ?? {})
+                        .sort(([, a], [, b]) => b - a)
+                        .map(([name, mins]) => `${name}: ${formatHours(mins)}`)
+                        .join(', ') || '—'}
                     </td>
                     <td className="border border-gray-200 px-3 py-2">
                       {formatHours(row.overtimeBalanceAfter)}

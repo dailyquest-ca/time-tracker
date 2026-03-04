@@ -42,7 +42,12 @@ function getEnv(name: string): string {
 
 export function getAuthorizeUrl(state: string): string {
   const clientId = getEnv('TICKTICK_CLIENT_ID');
-  const redirectUri = process.env.TICKTICK_REDIRECT_URI ?? '';
+  const redirectUri = process.env.TICKTICK_REDIRECT_URI?.trim() ?? '';
+  if (!redirectUri) {
+    throw new Error(
+      'Missing TICKTICK_REDIRECT_URI. Set it in .env.local (e.g. http://localhost:3000/api/auth/ticktick/callback for local, or your Vercel URL for production) and add the same URL in the TickTick developer portal.'
+    );
+  }
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -78,7 +83,7 @@ export async function exchangeCodeForTokens(
   const data = (await res.json()) as TickTickTokens & { expires_in?: number };
   return {
     access_token: data.access_token,
-    refresh_token: data.refresh_token,
+    refresh_token: data.refresh_token ?? '',
     expires_in: data.expires_in ?? 0,
   };
 }

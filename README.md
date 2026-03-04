@@ -12,7 +12,10 @@ Track daily hours from completed TickTick tasks (with start/end times), by categ
 
 1. **Install and env**
    - `npm install`
-   - Copy `.env.example` to `.env.local` and set variables (see below).
+   - **Local development:** Environment variables in Vercel only apply to deployed builds. To run locally you need a `.env.local` file:
+     - **Option A (recommended):** Install [Vercel CLI](https://vercel.com/docs/cli), run `vercel link` in this repo, then `vercel env pull .env.local` to download your Vercel env vars into `.env.local`.
+     - **Option B:** Copy `.env.example` to `.env.local` and paste in values (e.g. from Vercel → Project → Settings → Environment Variables).
+   - Do not commit `.env.local` (it is gitignored).
 
 2. **Database**
    - Create a Vercel Postgres (or any Postgres) database and set `POSTGRES_URL` or `DATABASE_URL`.
