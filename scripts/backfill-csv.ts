@@ -34,7 +34,8 @@ const workSegments = pgTable(
   'work_segments',
   {
     id: integer('id').generatedByDefaultAsIdentity().primaryKey(),
-    ticktickTaskId: text('ticktick_task_id').notNull(),
+    ticktickTaskId: text('ticktick_task_id'),
+    externalId: text('external_id').notNull(),
     date: text('date').notNull(),
     projectId: text('project_id'),
     projectName: text('project_name'),
@@ -42,10 +43,10 @@ const workSegments = pgTable(
     tags: jsonb('tags').$type<string[]>().default([]),
     category: text('category').notNull(),
     durationMinutes: integer('duration_minutes').notNull(),
-    source: text('source').default('ticktick'),
+    source: text('source').notNull().default('ticktick'),
     syncedAt: timestamp('synced_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique().on(t.ticktickTaskId, t.date)]
+  (t) => [unique().on(t.source, t.externalId, t.date)]
 );
 
 const dailyTotals = pgTable('daily_totals', {
@@ -341,6 +342,7 @@ async function main() {
       await db
         .insert(workSegments)
         .values({
+          externalId: syntheticId,
           ticktickTaskId: syntheticId,
           date: entry.date,
           projectId: `backfill-${slug}`,
@@ -352,13 +354,12 @@ async function main() {
           source: 'backfill',
         })
         .onConflictDoUpdate({
-          target: [workSegments.ticktickTaskId, workSegments.date],
+          target: [workSegments.source, workSegments.externalId, workSegments.date],
           set: {
             projectName: catName,
             taskTitle: title,
             category: catName,
             durationMinutes: catEntry.minutes,
-            source: 'backfill',
             syncedAt: new Date(),
           },
         });

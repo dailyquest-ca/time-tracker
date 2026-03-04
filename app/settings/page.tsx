@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 export default function SettingsPage() {
   const [connected, setConnected] = useState<boolean | null>(null);
+  const [msConnected, setMsConnected] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [urlError, setUrlError] = useState<string | null>(null);
@@ -14,7 +15,14 @@ export default function SettingsPage() {
     setError(null);
     try {
       const connRes = await fetch('/api/config/connection');
-      setConnected(connRes.ok ? (await connRes.json()).connected : false);
+      if (connRes.ok) {
+        const data = await connRes.json();
+        setConnected(data.connected);
+        setMsConnected(data.microsoftConnected);
+      } else {
+        setConnected(false);
+        setMsConnected(false);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
@@ -85,6 +93,25 @@ export default function SettingsPage() {
               className="inline-block rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
               Connect TickTick
+            </a>
+          )}
+        </section>
+
+        <section className="mb-8">
+          <h2 className="mb-2 text-lg font-medium">Microsoft Calendar</h2>
+          <p className="mb-2 text-sm text-gray-600">
+            {msConnected
+              ? 'Connected. Calendar events (non\u2013all-day) are synced as work segments, grouped by Outlook category.'
+              : 'Connect your Microsoft work account to sync Outlook/Teams calendar events.'}
+          </p>
+          {msConnected ? (
+            <span className="text-sm text-green-600">Connected</span>
+          ) : (
+            <a
+              href="/api/auth/microsoft"
+              className="inline-block rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+            >
+              Connect Microsoft
             </a>
           )}
         </section>

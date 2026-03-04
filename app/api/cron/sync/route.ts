@@ -1,3 +1,4 @@
+import { runCalendarSync } from '@/lib/calendar-sync';
 import { runSync } from '@/lib/sync';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -19,23 +20,39 @@ export async function GET(request: NextRequest) {
 
   console.log('[cron/sync] Starting scheduled sync...');
   const start = Date.now();
-  const result = await runSync();
+
+  const [ticktickResult, calendarResult] = await Promise.allSettled([
+    runSync(),
+    runCalendarSync(),
+  ]);
+
   const elapsed = Date.now() - start;
 
-  if (!result.ok) {
-    console.error(`[cron/sync] Failed in ${elapsed}ms: ${result.error}`);
-    return NextResponse.json(
-      { ok: false, error: result.error, elapsedMs: elapsed },
-      { status: 500 }
-    );
-  }
+  const ticktick =
+    ticktickResult.status === 'fulfilled'
+      ? ticktickResult.value
+      : { ok: false as const, error: String(ticktickResult.reason?.message ?? 'Unknown error'), segmentsProcessed: 0 };
+
+  const calendar =
+    calendarResult.status === 'fulfilled'
+      ? calendarResult.value
+      : { ok: false as const, error: String(calendarResult.reason?.message ?? 'Unknown error'), segmentsProcessed: 0 };
+
+  const anyOk = ticktick.ok || calendar.ok;
+  const ttSeg = ticktick.segmentsProcessed ?? 0;
+  const calSeg = calendar.segmentsProcessed ?? 0;
 
   console.log(
-    `[cron/sync] Completed in ${elapsed}ms — ${result.segmentsProcessed} segment(s) processed`
+    `[cron/sync] Completed in ${elapsed}ms — TickTick: ${ticktick.ok ? `${ttSeg} seg` : ticktick.error} | Calendar: ${calendar.ok ? `${calSeg} seg` : calendar.error}`,
   );
-  return NextResponse.json({
-    ok: true,
-    segmentsProcessed: result.segmentsProcessed,
-    elapsedMs: elapsed,
-  });
+
+  return NextResponse.json(
+    {
+      ok: anyOk,
+      elapsedMs: elapsed,
+      ticktick: { ok: ticktick.ok, segmentsProcessed: ttSeg, error: ticktick.error },
+      calendar: { ok: calendar.ok, segmentsProcessed: calSeg, error: calendar.error },
+    },
+    { status: anyOk ? 200 : 500 },
+  );
 }

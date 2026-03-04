@@ -13,7 +13,17 @@ export type WorkCategory = 'work_project' | 'general_task' | 'meeting';
 export const ticktickTokens = pgTable('ticktick_tokens', {
   userId: text('user_id').primaryKey().default('default'),
   accessToken: text('access_token').notNull(),
-  refreshToken: text('refresh_token'), // nullable: TickTick may not always return one
+  refreshToken: text('refresh_token'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const microsoftTokens = pgTable('microsoft_tokens', {
+  userId: text('user_id').primaryKey().default('default'),
+  accessToken: text('access_token').notNull(),
+  refreshToken: text('refresh_token'),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .notNull()
@@ -23,6 +33,7 @@ export const ticktickTokens = pgTable('ticktick_tokens', {
 export const syncState = pgTable('sync_state', {
   userId: text('user_id').primaryKey().default('default'),
   lastModifiedTime: timestamp('last_modified_time', { withTimezone: true }),
+  microsoftDeltaLink: text('microsoft_delta_link'),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -32,7 +43,8 @@ export const workSegments = pgTable(
   'work_segments',
   {
     id: integer('id').generatedByDefaultAsIdentity().primaryKey(),
-    ticktickTaskId: text('ticktick_task_id').notNull(),
+    ticktickTaskId: text('ticktick_task_id'),
+    externalId: text('external_id').notNull(),
     date: text('date').notNull(),
     projectId: text('project_id'),
     projectName: text('project_name'),
@@ -40,13 +52,13 @@ export const workSegments = pgTable(
     tags: jsonb('tags').$type<string[]>().default([]),
     category: text('category').notNull(),
     durationMinutes: integer('duration_minutes').notNull(),
-    source: text('source').default('ticktick'),
+    source: text('source').notNull().default('ticktick'),
     startAt: timestamp('start_at', { withTimezone: true }),
     endAt: timestamp('end_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     syncedAt: timestamp('synced_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique().on(t.ticktickTaskId, t.date)]
+  (t) => [unique().on(t.source, t.externalId, t.date)]
 );
 
 export const dailyTotals = pgTable('daily_totals', {
@@ -80,6 +92,8 @@ export const appConfig = pgTable('app_config', {
 
 export type InsertTicktickTokens = typeof ticktickTokens.$inferInsert;
 export type SelectTicktickTokens = typeof ticktickTokens.$inferSelect;
+export type InsertMicrosoftTokens = typeof microsoftTokens.$inferInsert;
+export type SelectMicrosoftTokens = typeof microsoftTokens.$inferSelect;
 export type InsertSyncState = typeof syncState.$inferInsert;
 export type SelectSyncState = typeof syncState.$inferSelect;
 export type InsertWorkSegments = typeof workSegments.$inferInsert;
