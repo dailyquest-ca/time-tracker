@@ -40,7 +40,8 @@ export async function POST(request: NextRequest) {
   }
 
   const authHeader = request.headers.get('authorization');
-  if (authHeader !== `Bearer ${secret}`) {
+  const queryToken = request.nextUrl.searchParams.get('token');
+  if (authHeader !== `Bearer ${secret}` && queryToken !== secret) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
