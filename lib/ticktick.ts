@@ -143,26 +143,36 @@ export async function getProjects(accessToken: string): Promise<TickTickProject[
 }
 
 /**
- * Fetch tasks. API returns all tasks; we filter by modifiedTime if provided.
+ * Fetch all tasks via project data. The Open API does not support GET /task;
+ * tasks are returned by GET /project/{id}/data per project.
+ * Pass `projects` when you already have them to avoid a second project list call.
  */
 export async function getTasks(
   accessToken: string,
-  options?: { modifiedSince?: Date }
+  options?: { modifiedSince?: Date; projects?: TickTickProject[] }
 ): Promise<TickTickTask[]> {
-  const data = await apiGet<unknown>(accessToken, '/task');
-  let tasks: TickTickTask[] = Array.isArray(data) ? (data as TickTickTask[]) : [];
-  if (!Array.isArray(data) && typeof data === 'object' && data !== null && 'tasks' in data) {
-    const arr = (data as { tasks?: TickTickTask[] }).tasks;
-    tasks = Array.isArray(arr) ? arr : [];
+  const projects = options?.projects ?? (await getProjects(accessToken));
+  const allTasks: TickTickTask[] = [];
+  for (const project of projects) {
+    if (project.closed) continue;
+    const data = await apiGet<{ tasks?: TickTickTask[] }>(
+      accessToken,
+      `/project/${encodeURIComponent(project.id)}/data`
+    );
+    const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
+    for (const t of tasks) {
+      allTasks.push({ ...t, projectId: t.projectId || project.id });
+    }
   }
+  let out = allTasks;
   if (options?.modifiedSince) {
     const since = options.modifiedSince.getTime();
-    tasks = tasks.filter((t) => {
+    out = out.filter((t) => {
       const mt = t.modifiedTime ? new Date(t.modifiedTime).getTime() : 0;
       return mt >= since;
     });
   }
-  return tasks;
+  return out;
 }
 
 /** Task is completed and has both start and end time for duration. */

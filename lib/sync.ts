@@ -84,10 +84,8 @@ export async function runSync(): Promise<{
     const modifiedSince =
       syncRow?.lastModifiedTime ?? new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
-    const [tasks, projects] = await Promise.all([
-      getTasks(accessToken, { modifiedSince }),
-      getProjects(accessToken),
-    ]);
+    const projects = await getProjects(accessToken);
+    const tasks = await getTasks(accessToken, { modifiedSince, projects });
 
     const projectMap = new Map(projects.map((p) => [p.id, p.name]));
     const affectedDates = new Set<string>();

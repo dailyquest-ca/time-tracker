@@ -35,7 +35,7 @@ function bcStatutoryHolidays(year: number): string[] {
 
   // Family Day - 3rd Monday in February
   const feb3Mon = (() => {
-    let d = new Date(Date.UTC(year, 1, 1, 12, 0, 0));
+    const d = new Date(Date.UTC(year, 1, 1, 12, 0, 0));
     const day = d.getUTCDay();
     const toMon = day === 0 ? 1 : day === 1 ? 0 : 8 - day;
     d.setUTCDate(1 + toMon + 14);
@@ -96,7 +96,7 @@ function bcStatutoryHolidays(year: number): string[] {
   return dates;
 }
 
-let cachedByYear: Map<number, Set<string>> = new Map();
+const cachedByYear: Map<number, Set<string>> = new Map();
 
 function getHolidaySet(year: number): Set<string> {
   if (!cachedByYear.has(year)) {
