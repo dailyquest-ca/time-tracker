@@ -88,15 +88,18 @@ export async function recomputeDailyTotalsForDates(
 
   for (const dateKey of allDatesInRange) {
     const data = byDate.get(dateKey) ?? { total: 0, byCategory: {} };
-    if (!isBCWorkDay(dateKey)) {
-      continue;
-    }
     const totalMinutes = data.total;
-    if (totalMinutes > MINUTES_PER_STANDARD_DAY) {
-      runningOvertime += totalMinutes - MINUTES_PER_STANDARD_DAY;
+    if (isBCWorkDay(dateKey)) {
+      // Workday: standard 8h expected; positive delta adds overtime, shortfall reduces it
+      if (totalMinutes > MINUTES_PER_STANDARD_DAY) {
+        runningOvertime += totalMinutes - MINUTES_PER_STANDARD_DAY;
+      } else {
+        const shortfall = MINUTES_PER_STANDARD_DAY - totalMinutes;
+        runningOvertime = Math.max(0, runningOvertime - shortfall);
+      }
     } else {
-      const shortfall = MINUTES_PER_STANDARD_DAY - totalMinutes;
-      runningOvertime = Math.max(0, runningOvertime - shortfall);
+      // Weekend/holiday: expected 0h, so all worked minutes add to overtime
+      runningOvertime += totalMinutes;
     }
     await db
       .insert(dailyTotals)

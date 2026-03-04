@@ -1,3 +1,14 @@
+/**
+ * TickTick webhook endpoint — called by TickTick when a task is created/updated/completed.
+ *
+ * Setup:
+ * 1. In the TickTick developer portal, register a webhook pointing to:
+ *      POST https://<your-domain>/api/webhooks/ticktick
+ * 2. Copy the secret token TickTick provides and set it as TICKTICK_WEBHOOK_SECRET
+ *    in Vercel project settings (and in .env.local for local testing).
+ * 3. TickTick must send the HMAC-SHA256 signature in the x-ticktick-signature header.
+ *    If TICKTICK_WEBHOOK_SECRET is not set, signature verification is skipped (dev only).
+ */
 import { runSync } from '@/lib/sync';
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';

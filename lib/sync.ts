@@ -87,6 +87,20 @@ export async function runSync(): Promise<{
     const projects = await getProjects(accessToken);
     const tasks = await getTasks(accessToken, { modifiedSince, projects });
 
+    // Use the max modifiedTime seen (minus 5 min safety buffer) as the new watermark
+    // so we never miss tasks due to clock skew between our server and TickTick.
+    let maxModifiedTime: Date | null = null;
+    for (const t of tasks) {
+      if (t.modifiedTime) {
+        const mt = new Date(t.modifiedTime);
+        if (!maxModifiedTime || mt > maxModifiedTime) maxModifiedTime = mt;
+      }
+    }
+    const SAFETY_BUFFER_MS = 5 * 60 * 1000;
+    const nextWatermark = maxModifiedTime
+      ? new Date(maxModifiedTime.getTime() - SAFETY_BUFFER_MS)
+      : new Date();
+
     const projectMap = new Map(projects.map((p) => [p.id, p.name]));
     const affectedDates = new Set<string>();
 
@@ -136,12 +150,12 @@ export async function runSync(): Promise<{
       .insert(syncState)
       .values({
         userId: USER_ID,
-        lastModifiedTime: now,
+        lastModifiedTime: nextWatermark,
         updatedAt: now,
       })
       .onConflictDoUpdate({
         target: syncState.userId,
-        set: { lastModifiedTime: now, updatedAt: now },
+        set: { lastModifiedTime: nextWatermark, updatedAt: now },
       });
 
     if (affectedDates.size > 0) {
