@@ -2,8 +2,8 @@ import { eq } from 'drizzle-orm';
 import { db } from './db';
 import { syncState, ticktickTokens, workSegments } from './schema';
 import {
+  getAllCompletedTasksV2,
   getProjects,
-  getTasks,
   isCompletedTaskWithDuration,
   refreshAccessToken,
   taskDateKey,
@@ -81,41 +81,56 @@ export async function runSync(): Promise<{
       .from(syncState)
       .where(eq(syncState.userId, USER_ID))
       .limit(1);
-    const modifiedSince =
+    const since =
       syncRow?.lastModifiedTime ?? new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
     const projects = await getProjects(accessToken);
-    const tasks = await getTasks(accessToken, { modifiedSince, projects });
-
-    // Use the max modifiedTime seen (minus 5 min safety buffer) as the new watermark
-    // so we never miss tasks due to clock skew between our server and TickTick.
-    let maxModifiedTime: Date | null = null;
-    for (const t of tasks) {
-      if (t.modifiedTime) {
-        const mt = new Date(t.modifiedTime);
-        if (!maxModifiedTime || mt > maxModifiedTime) maxModifiedTime = mt;
-      }
-    }
-    const SAFETY_BUFFER_MS = 5 * 60 * 1000;
-    const nextWatermark = maxModifiedTime
-      ? new Date(maxModifiedTime.getTime() - SAFETY_BUFFER_MS)
-      : new Date();
-
     const projectMap = new Map(projects.map((p) => [p.id, p.name]));
-    const affectedDates = new Set<string>();
 
-    for (const task of tasks) {
+    console.log(
+      `[sync] Fetching completed tasks via v2 API (since ${since.toISOString()}) across ${projects.filter((p) => !p.closed).length} project(s)…`,
+    );
+
+    const completedTasks = await getAllCompletedTasksV2(accessToken, {
+      since,
+      projects,
+    });
+
+    const timedTasks = completedTasks.filter(isCompletedTaskWithDuration);
+
+    console.log(
+      `[sync] v2 returned ${completedTasks.length} completed task(s), ${timedTasks.length} with duration`,
+    );
+
+    const affectedDates = new Set<string>();
+    let segmentsProcessed = 0;
+
+    for (const task of timedTasks) {
       const dateKey = taskDateKey(task);
-      if (isCompletedTaskWithDuration(task)) {
-        const projectName = projectMap.get(task.projectId) ?? task.projectId;
-        const category = projectName;
-        const durationMinutes = roundToNearest15(taskDurationMinutes(task));
-        affectedDates.add(dateKey);
-        await db
-          .insert(workSegments)
-          .values({
-            ticktickTaskId: task.id,
-            date: dateKey,
+      const projectName = projectMap.get(task.projectId) ?? task.projectId;
+      const category = projectName;
+      const durationMinutes = roundToNearest15(taskDurationMinutes(task));
+      affectedDates.add(dateKey);
+
+      await db
+        .insert(workSegments)
+        .values({
+          ticktickTaskId: task.id,
+          date: dateKey,
+          projectId: task.projectId,
+          projectName,
+          taskTitle: task.title ?? null,
+          tags: task.tags ?? [],
+          category,
+          durationMinutes,
+          source: 'ticktick',
+          startAt: task.startDate ? new Date(task.startDate) : null,
+          endAt: task.dueDate ? new Date(task.dueDate) : null,
+          completedAt: task.completedTime ? new Date(task.completedTime) : null,
+        })
+        .onConflictDoUpdate({
+          target: [workSegments.ticktickTaskId, workSegments.date],
+          set: {
             projectId: task.projectId,
             projectName,
             taskTitle: task.title ?? null,
@@ -126,34 +141,24 @@ export async function runSync(): Promise<{
             startAt: task.startDate ? new Date(task.startDate) : null,
             endAt: task.dueDate ? new Date(task.dueDate) : null,
             completedAt: task.completedTime ? new Date(task.completedTime) : null,
-          })
-          .onConflictDoUpdate({
-            target: [workSegments.ticktickTaskId, workSegments.date],
-            set: {
-              projectId: task.projectId,
-              projectName,
-              taskTitle: task.title ?? null,
-              tags: task.tags ?? [],
-              category,
-              durationMinutes,
-              source: 'ticktick',
-              startAt: task.startDate ? new Date(task.startDate) : null,
-              endAt: task.dueDate ? new Date(task.dueDate) : null,
-              completedAt: task.completedTime ? new Date(task.completedTime) : null,
-              syncedAt: new Date(),
-            },
-          });
-      } else {
-        const segmentsForTask = await db
-          .select({ date: workSegments.date })
-          .from(workSegments)
-          .where(eq(workSegments.ticktickTaskId, task.id));
-        segmentsForTask.forEach((s) => affectedDates.add(s.date));
-        await db
-          .delete(workSegments)
-          .where(eq(workSegments.ticktickTaskId, task.id));
+            syncedAt: new Date(),
+          },
+        });
+      segmentsProcessed++;
+    }
+
+    // Advance watermark only when new tasks are found (based on completedTime, with 5-min buffer).
+    const SAFETY_BUFFER_MS = 5 * 60 * 1000;
+    let maxCompletedTime: Date | null = null;
+    for (const t of timedTasks) {
+      if (t.completedTime) {
+        const ct = new Date(t.completedTime);
+        if (!maxCompletedTime || ct > maxCompletedTime) maxCompletedTime = ct;
       }
     }
+    const nextWatermark = maxCompletedTime
+      ? new Date(maxCompletedTime.getTime() - SAFETY_BUFFER_MS)
+      : since;
 
     const now = new Date();
     await db
@@ -172,12 +177,10 @@ export async function runSync(): Promise<{
       await recomputeDailyTotalsForDates(Array.from(affectedDates));
     }
 
-    return {
-      ok: true,
-      segmentsProcessed: tasks.filter(isCompletedTaskWithDuration).length,
-    };
+    return { ok: true, segmentsProcessed };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error(`[sync] Error: ${message}`);
     return { ok: false, error: message };
   }
 }

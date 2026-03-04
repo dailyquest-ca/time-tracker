@@ -175,10 +175,11 @@ export async function getTasks(
   return out;
 }
 
-/** Task is completed and has both start and end time for duration. */
+/** Task is completed and has both start and end time for duration.
+ *  Handles v1 (status 1) and v2 (status 2) status codes. */
 export function isCompletedTaskWithDuration(task: TickTickTask): boolean {
   return (
-    task.status === 1 &&
+    (task.status === 2 || task.status === 1) &&
     !!task.startDate &&
     !!task.dueDate
   );
@@ -196,4 +197,69 @@ export function taskDurationMinutes(task: TickTickTask): number {
 export function taskDateKey(task: TickTickTask): string {
   const d = task.startDate ? new Date(task.startDate) : new Date();
   return d.toISOString().slice(0, 10);
+}
+
+// ---------------------------------------------------------------------------
+// TickTick v2 (unofficial) API — needed because v1 project data endpoints
+// do not return completed tasks. The v1 OAuth Bearer token is accepted by v2.
+// ---------------------------------------------------------------------------
+
+const TICKTICK_V2_BASE = 'https://api.ticktick.com/api/v2';
+
+/**
+ * Fetch completed tasks for a single project via the v2 API.
+ * Returns an array of task objects (same shape as v1 TickTickTask).
+ */
+export async function getCompletedTasksV2(
+  accessToken: string,
+  projectId: string,
+): Promise<TickTickTask[]> {
+  const url = `${TICKTICK_V2_BASE}/project/${encodeURIComponent(projectId)}/completed/`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`TickTick v2 completed/${projectId}: ${res.status} ${text}`);
+  }
+
+  const data = await res.json();
+  return Array.isArray(data) ? (data as TickTickTask[]) : [];
+}
+
+/**
+ * Fetch all completed tasks across every open project using v2.
+ * Optionally filter to tasks completed after `since` (delta polling).
+ */
+export async function getAllCompletedTasksV2(
+  accessToken: string,
+  options?: { since?: Date; projects?: TickTickProject[] },
+): Promise<TickTickTask[]> {
+  const projects = options?.projects ?? (await getProjects(accessToken));
+  const all: TickTickTask[] = [];
+
+  for (const project of projects) {
+    if (project.closed) continue;
+    try {
+      const tasks = await getCompletedTasksV2(accessToken, project.id);
+      for (const t of tasks) {
+        all.push({ ...t, projectId: t.projectId || project.id });
+      }
+    } catch (err) {
+      console.warn(
+        `[ticktick-v2] Failed for project "${project.name}": ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+
+  if (options?.since) {
+    const sinceMs = options.since.getTime();
+    return all.filter((t) => {
+      const ct = t.completedTime ? new Date(t.completedTime).getTime() : 0;
+      return ct >= sinceMs;
+    });
+  }
+
+  return all;
 }
