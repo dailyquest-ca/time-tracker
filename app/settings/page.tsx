@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from 'react';
 
 export default function SettingsPage() {
   const [connected, setConnected] = useState<boolean | null>(null);
-  const [msConnected, setMsConnected] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [urlError, setUrlError] = useState<string | null>(null);
@@ -18,10 +17,8 @@ export default function SettingsPage() {
       if (connRes.ok) {
         const data = await connRes.json();
         setConnected(data.connected);
-        setMsConnected(data.microsoftConnected);
       } else {
         setConnected(false);
-        setMsConnected(false);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
@@ -98,22 +95,30 @@ export default function SettingsPage() {
         </section>
 
         <section className="mb-8">
-          <h2 className="mb-2 text-lg font-medium">Microsoft Calendar</h2>
+          <h2 className="mb-2 text-lg font-medium">Microsoft Calendar (Power Automate)</h2>
           <p className="mb-2 text-sm text-gray-600">
-            {msConnected
-              ? 'Connected. Calendar events (non\u2013all-day) are synced as work segments, grouped by Outlook category.'
-              : 'Connect your Microsoft work account to sync Outlook/Teams calendar events.'}
+            Outlook/Teams calendar events are synced via a Power Automate flow that
+            pushes events to this app. Non&ndash;all-day events are tracked as work
+            segments, grouped by Outlook category.
           </p>
-          {msConnected ? (
-            <span className="text-sm text-green-600">Connected</span>
-          ) : (
-            <a
-              href="/api/auth/microsoft"
-              className="inline-block rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-            >
-              Connect Microsoft
-            </a>
-          )}
+          <details className="mt-2 rounded border border-gray-200 bg-gray-50 p-3">
+            <summary className="cursor-pointer text-sm font-medium text-gray-700">
+              Setup instructions
+            </summary>
+            <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-gray-600">
+              <li>Open <a href="https://make.powerautomate.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">Power Automate</a> and create a new <strong>Scheduled cloud flow</strong> (e.g. every 15 minutes).</li>
+              <li>Add <strong>Office 365 Outlook &rarr; Get events (V4)</strong>. Set Calendar id to your default calendar, and filter to today&apos;s date range.</li>
+              <li>Add <strong>Apply to each</strong> over the returned events.</li>
+              <li>Inside the loop, add an <strong>HTTP</strong> action:<br />
+                <code className="block mt-1 bg-gray-100 p-2 rounded text-xs break-all">
+                  POST &lt;your-app-url&gt;/api/ingest/calendar
+                </code>
+                <span className="block mt-1">Header: <code className="bg-gray-100 px-1 rounded text-xs">Authorization: Bearer &lt;INGEST_SECRET&gt;</code></span>
+                <span className="block mt-1">Body (JSON): map <code className="bg-gray-100 px-1 rounded text-xs">Id, Subject, Start, End, Categories, IsAllDay</code> from the event.</span>
+              </li>
+              <li>Save and test the flow.</li>
+            </ol>
+          </details>
         </section>
       </div>
     </main>
