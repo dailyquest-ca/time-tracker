@@ -43,8 +43,9 @@ function resolveBroadCategory(title: string): string {
 }
 
 /**
- * Resolve category for a new event. Only assigns active categories.
- * activeCategories: list of { name, archived } (archived === 0 means active).
+ * Resolve category for a new event.
+ * If title starts with a capitalized acronym (e.g. ELAN, PIS), use it as the category.
+ * Otherwise use broad categories (Learning, 1:1s, General) when they match or are active.
  */
 export function resolveCategory(
   title: string,
@@ -55,7 +56,7 @@ export function resolveCategory(
   );
 
   const acronym = extractAcronym(title);
-  if (acronym && activeNames.has(acronym)) return acronym;
+  if (acronym) return acronym;
 
   const broad = resolveBroadCategory(title);
   if (activeNames.has(broad)) return broad;

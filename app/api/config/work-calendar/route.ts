@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { appConfig } from '@/lib/schema';
 import { eq } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
+import { ensureCalendarWatch } from '@/lib/google-calendar-sync';
 
 const KEY = 'work_calendar_id';
 
@@ -42,5 +43,8 @@ export async function PATCH(request: NextRequest) {
       target: appConfig.key,
       set: { value: calendarId, updatedAt: new Date() },
     });
+  await ensureCalendarWatch().catch((e) =>
+    console.warn('[work-calendar] Watch ensure after save:', e),
+  );
   return NextResponse.json({ ok: true, calendarId });
 }

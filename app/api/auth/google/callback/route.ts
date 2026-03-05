@@ -34,10 +34,15 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI?.trim();
   if (!redirectUri) {
     return NextResponse.redirect(
-      new URL('/settings?error=redirect_uri_not_configured', request.url),
+      new URL('/settings?error=' + encodeURIComponent('GOOGLE_REDIRECT_URI not set in environment.'), request.url),
+    );
+  }
+  if (!process.env.GOOGLE_CLIENT_ID?.trim() || !process.env.GOOGLE_CLIENT_SECRET?.trim()) {
+    return NextResponse.redirect(
+      new URL('/settings?error=' + encodeURIComponent('Google OAuth not fully configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.'), request.url),
     );
   }
 

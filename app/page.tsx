@@ -124,7 +124,6 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   // Day detail modal
   const [modalDate, setModalDate] = useState<string | null>(null);
@@ -141,23 +140,36 @@ export default function HomePage() {
     return getPageRange(page, PAGE_SIZE);
   }, [view, selectedYear, page]);
 
-  const fetchHours = useCallback(async (from: string, to: string) => {
-    setLoading(true);
+  const fetchHours = useCallback(async (from: string, to: string, silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await fetch(`/api/hours?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
       if (!res.ok) throw new Error(await res.text());
       const json = await res.json();
       setData(json.data ?? []);
     } catch {
-      setData([]);
+      if (!silent) setData([]);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     fetchHours(range.from, range.to);
   }, [range.from, range.to, fetchHours]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchHours(range.from, range.to, true);
+      const mm = String(ppMonth).padStart(2, '0');
+      const lastDay = new Date(ppYear, ppMonth, 0).getDate();
+      fetch(`/api/hours?from=${ppYear}-${mm}-01&to=${ppYear}-${mm}-${lastDay}`)
+        .then((res) => res.json())
+        .then((json) => setPpData(json.data ?? []))
+        .catch(() => {});
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [range.from, range.to, fetchHours, ppMonth, ppYear]);
 
   // Fetch pay period data
   useEffect(() => {
@@ -171,15 +183,13 @@ export default function HomePage() {
       .catch(() => setPpData([]));
   }, [ppMonth, ppYear]);
 
-  const handleSync = async () => {
+  const handleSyncNow = async () => {
     setSyncing(true);
     setSyncError(null);
-    setSyncMsg(null);
     try {
       const res = await fetch('/api/sync', { method: 'POST' });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Sync failed');
-      setSyncMsg(`Synced ${json.segmentsProcessed ?? 0} task(s)`);
       await fetchHours(range.from, range.to);
     } catch (e) {
       setSyncError(e instanceof Error ? e.message : 'Sync failed');
@@ -243,23 +253,19 @@ export default function HomePage() {
           <div className="flex items-center gap-3 text-sm">
             <button
               type="button"
-              onClick={handleSync}
+              onClick={handleSyncNow}
               disabled={syncing}
               className="rounded bg-blue-600 px-3 py-1 text-white hover:bg-blue-700 disabled:opacity-50 text-xs font-medium"
             >
-              {syncing ? 'Syncing...' : 'Sync'}
+              {syncing ? 'Syncing…' : 'Sync now'}
             </button>
             <Link href="/settings" className="text-gray-500 hover:text-gray-800 underline text-xs">
               Settings
             </Link>
           </div>
         </header>
-
         {syncError && (
           <p className="mb-2 rounded border border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">{syncError}</p>
-        )}
-        {syncMsg && (
-          <p className="mb-2 text-xs text-green-600">{syncMsg}</p>
         )}
 
         {/* View switcher */}
@@ -328,7 +334,7 @@ export default function HomePage() {
           <div className="rounded-lg border border-gray-200 bg-white px-5 py-8 text-center text-sm text-gray-500 shadow-sm">
             No hours in this range.{' '}
             <Link href="/settings" className="underline text-blue-600">Connect Google and choose a work calendar</Link>
-            {' '}in Settings, then click Sync.
+            {' '}in Settings. Hours update automatically when your calendar changes.
           </div>
         ) : (
           <div className="rounded-lg border border-gray-200 bg-white shadow-sm">

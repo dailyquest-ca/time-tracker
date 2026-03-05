@@ -13,6 +13,8 @@ export async function POST(request: NextRequest) {
   const channelId = request.headers.get('x-goog-channel-id');
   const resourceState = request.headers.get('x-goog-resource-state');
 
+  console.warn('[webhook] POST received', { channelId: channelId ?? null, resourceState: resourceState ?? null });
+
   if (!channelId) {
     return NextResponse.json({ error: 'Missing channel id' }, { status: 400 });
   }
@@ -22,11 +24,13 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await runGoogleCalendarSync();
-    if (!result.ok) {
-      console.warn(`[webhooks/google-calendar] Sync failed: ${result.error}`);
+    if (result.ok) {
+      console.warn('[webhook] Sync completed successfully');
+    } else {
+      console.warn('[webhook] Sync failed:', result.error);
     }
   } catch (err) {
-    console.error('[webhooks/google-calendar] Error:', err);
+    console.error('[webhook] Error:', err);
   }
 
   return NextResponse.json({ ok: true });

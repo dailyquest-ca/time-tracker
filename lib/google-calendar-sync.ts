@@ -261,9 +261,13 @@ export async function ensureCalendarWatch(): Promise<{
   }
   const base = getWebhookBaseUrl();
   if (!base) {
+    console.warn('[watch] Not created: APP_URL and VERCEL_URL are both unset. Google cannot send push notifications.');
     return { ok: false, error: 'APP_URL or VERCEL_URL not set; cannot create watch.' };
   }
   const address = `${base}/api/webhooks/google-calendar`;
+  if (base.includes('localhost')) {
+    console.warn('[watch] base URL contains localhost — Google cannot reach this. Set APP_URL to your public URL (e.g. https://your-app.vercel.app) for live updates.');
+  }
   try {
     const channel = await createCalendarWatch(accessToken, calendarId, address, {
       ttlSeconds: 7 * 24 * 60 * 60 - 60,
@@ -288,7 +292,8 @@ export async function ensureCalendarWatch(): Promise<{
           expiration,
           updatedAt: new Date(),
         },
-      });
+      }    );
+    console.warn('[watch] Created: Google will POST to', address);
     return { ok: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
