@@ -1,9 +1,11 @@
-import { runCalendarSync } from '@/lib/calendar-sync';
+import { runGoogleCalendarSync } from '@/lib/google-calendar-sync';
 import { runSync } from '@/lib/sync';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
+
+type SyncResult = { ok: boolean; error?: string; segmentsProcessed?: number };
 
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
@@ -21,29 +23,30 @@ export async function GET(request: NextRequest) {
   console.log('[cron/sync] Starting scheduled sync...');
   const start = Date.now();
 
-  const [ticktickResult, calendarResult] = await Promise.allSettled([
+  const [ticktickResult, googleResult] = await Promise.allSettled([
     runSync(),
-    runCalendarSync(),
+    runGoogleCalendarSync(),
   ]);
 
   const elapsed = Date.now() - start;
 
+  const fail = (reason: unknown): SyncResult => ({
+    ok: false,
+    error: String((reason as Error)?.message ?? 'Unknown error'),
+    segmentsProcessed: 0,
+  });
+
   const ticktick =
-    ticktickResult.status === 'fulfilled'
-      ? ticktickResult.value
-      : { ok: false as const, error: String(ticktickResult.reason?.message ?? 'Unknown error'), segmentsProcessed: 0 };
+    ticktickResult.status === 'fulfilled' ? ticktickResult.value : fail(ticktickResult.reason);
+  const google =
+    googleResult.status === 'fulfilled' ? googleResult.value : fail(googleResult.reason);
 
-  const calendar =
-    calendarResult.status === 'fulfilled'
-      ? calendarResult.value
-      : { ok: false as const, error: String(calendarResult.reason?.message ?? 'Unknown error'), segmentsProcessed: 0 };
-
-  const anyOk = ticktick.ok || calendar.ok;
+  const anyOk = ticktick.ok || google.ok;
   const ttSeg = ticktick.segmentsProcessed ?? 0;
-  const calSeg = calendar.segmentsProcessed ?? 0;
+  const gSeg = google.segmentsProcessed ?? 0;
 
   console.log(
-    `[cron/sync] Completed in ${elapsed}ms — TickTick: ${ticktick.ok ? `${ttSeg} seg` : ticktick.error} | Calendar: ${calendar.ok ? `${calSeg} seg` : calendar.error}`,
+    `[cron/sync] Completed in ${elapsed}ms — TickTick: ${ticktick.ok ? `${ttSeg} seg` : ticktick.error} | Google: ${google.ok ? `${gSeg} seg` : google.error}`,
   );
 
   return NextResponse.json(
@@ -51,7 +54,7 @@ export async function GET(request: NextRequest) {
       ok: anyOk,
       elapsedMs: elapsed,
       ticktick: { ok: ticktick.ok, segmentsProcessed: ttSeg, error: ticktick.error },
-      calendar: { ok: calendar.ok, segmentsProcessed: calSeg, error: calendar.error },
+      google: { ok: google.ok, segmentsProcessed: gSeg, error: google.error },
     },
     { status: anyOk ? 200 : 500 },
   );

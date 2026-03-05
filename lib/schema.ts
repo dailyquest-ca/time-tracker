@@ -30,6 +30,16 @@ export const microsoftTokens = pgTable('microsoft_tokens', {
     .defaultNow(),
 });
 
+export const googleTokens = pgTable('google_tokens', {
+  userId: text('user_id').primaryKey().default('default'),
+  accessToken: text('access_token').notNull(),
+  refreshToken: text('refresh_token'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const syncState = pgTable('sync_state', {
   userId: text('user_id').primaryKey().default('default'),
   lastModifiedTime: timestamp('last_modified_time', { withTimezone: true }),
@@ -94,6 +104,8 @@ export type InsertTicktickTokens = typeof ticktickTokens.$inferInsert;
 export type SelectTicktickTokens = typeof ticktickTokens.$inferSelect;
 export type InsertMicrosoftTokens = typeof microsoftTokens.$inferInsert;
 export type SelectMicrosoftTokens = typeof microsoftTokens.$inferSelect;
+export type InsertGoogleTokens = typeof googleTokens.$inferInsert;
+export type SelectGoogleTokens = typeof googleTokens.$inferSelect;
 export type InsertSyncState = typeof syncState.$inferInsert;
 export type SelectSyncState = typeof syncState.$inferSelect;
 export type InsertWorkSegments = typeof workSegments.$inferInsert;
