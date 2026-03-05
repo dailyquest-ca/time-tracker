@@ -37,7 +37,7 @@ export function getGoogleAuthorizeUrl(state: string): string {
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: 'code',
-    scope: 'https://www.googleapis.com/auth/calendar.readonly',
+    scope: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events.readonly',
     access_type: 'offline',
     prompt: 'consent',
     state,
@@ -89,16 +89,42 @@ export async function refreshGoogleToken(
   return res.json() as Promise<GoogleTokens>;
 }
 
+export interface GoogleCalendarListEntry {
+  id: string;
+  summary?: string;
+  primary?: boolean;
+}
+
+/**
+ * List calendars for the authenticated user (for calendar picker).
+ */
+export async function listCalendars(
+  accessToken: string,
+): Promise<GoogleCalendarListEntry[]> {
+  const url = `${GOOGLE_CALENDAR_BASE}/users/me/calendarList?minAccessRole=owner&fields=items(id,summary,primary)`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Google Calendar list: ${res.status} ${text}`);
+  }
+  const data = (await res.json()) as { items?: GoogleCalendarListEntry[] };
+  return data.items ?? [];
+}
+
 /**
  * Fetch calendar events in a time window using events.list with timeMin/timeMax.
  * Handles pagination via nextPageToken. Expands recurring events into single instances.
  */
 export async function listCalendarEvents(
   accessToken: string,
+  calendarId: string,
   options: { timeMin: string; timeMax: string },
 ): Promise<GoogleCalendarEvent[]> {
   const allEvents: GoogleCalendarEvent[] = [];
   let pageToken: string | undefined;
+  const encodedId = encodeURIComponent(calendarId);
 
   do {
     const params = new URLSearchParams({
@@ -112,7 +138,7 @@ export async function listCalendarEvents(
     });
     if (pageToken) params.set('pageToken', pageToken);
 
-    const url = `${GOOGLE_CALENDAR_BASE}/calendars/primary/events?${params.toString()}`;
+    const url = `${GOOGLE_CALENDAR_BASE}/calendars/${encodedId}/events?${params.toString()}`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
@@ -129,4 +155,62 @@ export async function listCalendarEvents(
   } while (pageToken);
 
   return allEvents;
+}
+
+export interface WatchChannelResponse {
+  id: string;
+  resourceId: string;
+  resourceUri: string;
+  expiration: string; // Unix timestamp in milliseconds
+}
+
+/**
+ * Create a watch (push notification channel) for a calendar's events.
+ * Caller must store id, resourceId, and expiration and renew before expiration.
+ */
+export async function createCalendarWatch(
+  accessToken: string,
+  calendarId: string,
+  address: string,
+  options?: { channelId?: string; ttlSeconds?: number },
+): Promise<WatchChannelResponse> {
+  const encodedId = encodeURIComponent(calendarId);
+  const url = `${GOOGLE_CALENDAR_BASE}/calendars/${encodedId}/events/watch`;
+  const body: {
+    id: string;
+    type: string;
+    address: string;
+    params?: { ttl: string };
+  } = {
+    id: options?.channelId ?? crypto.randomUUID(),
+    type: 'web_hook',
+    address,
+  };
+  if (options?.ttlSeconds != null) {
+    body.params = { ttl: String(options.ttlSeconds) };
+  }
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Google Calendar events.watch: ${res.status} ${text}`);
+  }
+  const data = (await res.json()) as {
+    id: string;
+    resourceId: string;
+    resourceUri: string;
+    expiration: string;
+  };
+  return {
+    id: data.id,
+    resourceId: data.resourceId,
+    resourceUri: data.resourceUri,
+    expiration: data.expiration,
+  };
 }

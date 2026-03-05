@@ -1,11 +1,11 @@
-import { runGoogleCalendarSync } from '@/lib/google-calendar-sync';
-import { runSync } from '@/lib/sync';
+import {
+  renewCalendarWatchIfNeeded,
+  runGoogleCalendarSync,
+} from '@/lib/google-calendar-sync';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
-
-type SyncResult = { ok: boolean; error?: string; segmentsProcessed?: number };
 
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
@@ -20,42 +20,27 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  console.log('[cron/sync] Starting scheduled sync...');
+  console.log('[cron/sync] Starting...');
   const start = Date.now();
 
-  const [ticktickResult, googleResult] = await Promise.allSettled([
-    runSync(),
-    runGoogleCalendarSync(),
-  ]);
+  const renewed = await renewCalendarWatchIfNeeded();
+  if (renewed) console.log('[cron/sync] Calendar watch renewed.');
 
+  const result = await runGoogleCalendarSync();
   const elapsed = Date.now() - start;
 
-  const fail = (reason: unknown): SyncResult => ({
-    ok: false,
-    error: String((reason as Error)?.message ?? 'Unknown error'),
-    segmentsProcessed: 0,
-  });
-
-  const ticktick =
-    ticktickResult.status === 'fulfilled' ? ticktickResult.value : fail(ticktickResult.reason);
-  const google =
-    googleResult.status === 'fulfilled' ? googleResult.value : fail(googleResult.reason);
-
-  const anyOk = ticktick.ok || google.ok;
-  const ttSeg = ticktick.segmentsProcessed ?? 0;
-  const gSeg = google.segmentsProcessed ?? 0;
-
   console.log(
-    `[cron/sync] Completed in ${elapsed}ms — TickTick: ${ticktick.ok ? `${ttSeg} seg` : ticktick.error} | Google: ${google.ok ? `${gSeg} seg` : google.error}`,
+    `[cron/sync] Completed in ${elapsed}ms — ${result.ok ? `${result.segmentsProcessed ?? 0} segments` : result.error}`,
   );
 
   return NextResponse.json(
     {
-      ok: anyOk,
+      ok: result.ok,
       elapsedMs: elapsed,
-      ticktick: { ok: ticktick.ok, segmentsProcessed: ttSeg, error: ticktick.error },
-      google: { ok: google.ok, segmentsProcessed: gSeg, error: google.error },
+      watchRenewed: renewed,
+      segmentsProcessed: result.segmentsProcessed,
+      error: result.error,
     },
-    { status: anyOk ? 200 : 500 },
+    { status: result.ok ? 200 : 500 },
   );
 }

@@ -37,11 +37,11 @@ export async function GET(request: NextRequest) {
     const tasks = segments
       .map((s) => ({
         id: s.id,
-        taskTitle: s.taskTitle ?? s.category,
+        taskTitle: s.title ?? s.category,
         category: s.category,
-        projectName: s.projectName,
+        projectName: null as string | null,
         durationMinutes: s.durationMinutes,
-        source: s.source ?? 'unknown',
+        source: 'google_calendar',
       }))
       .sort((a, b) => b.durationMinutes - a.durationMinutes);
 

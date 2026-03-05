@@ -1,85 +1,49 @@
 # Time Tracker
 
-Track daily hours from completed TickTick tasks (with start/end times), by category (Work project, General tasks, Meetings), and overtime (over 8h per work day accumulates; under 8h or no work consumes it).
+Track daily work hours from a single **Google Calendar** (your Work calendar). Time updates on **any change** to that calendar via push notifications. Events are categorized by title: a leading **capitalized acronym** (e.g. PIS, ELAN) becomes the category when it matches a user-defined category; otherwise events fall into broad categories (Learning, 1:1s, General tasks/meetings). You can add and archive categories; archived categories still apply to past dates but are not used for new events.
 
 ## Stack
 
 - Next.js 15 (App Router), TypeScript, Tailwind CSS
 - Vercel Postgres + Drizzle ORM
-- TickTick Open API (OAuth 2.0, tasks, projects)
+- Google Calendar API (OAuth 2.0, events, push watch)
 
 ## Setup
 
 1. **Install and env**
    - `npm install`
-   - **Local development:** Environment variables in Vercel only apply to deployed builds. To run locally you need a `.env.local` file:
-     - **Option A (recommended):** Install [Vercel CLI](https://vercel.com/docs/cli), run `vercel link` in this repo, then `vercel env pull .env.local` to download your Vercel env vars into `.env.local`.
-     - **Option B:** Copy `.env.example` to `.env.local` and paste in values (e.g. from Vercel → Project → Settings → Environment Variables).
+   - Copy `.env.example` to `.env.local` and fill in values (or use Vercel CLI: `vercel env pull .env.local`).
    - Do not commit `.env.local` (it is gitignored).
 
 2. **Database**
    - Create a Vercel Postgres (or any Postgres) database and set `POSTGRES_URL` or `DATABASE_URL`.
-   - Run `npm run db:push` to create tables (or use `npm run db:generate` then your migration runner).
+   - Run the migration: apply `drizzle/0001_google_calendar.sql` to your database (or use `npm run db:push` if your schema is in sync).
 
-3. **TickTick**
-   - Create an app in the [TickTick developer portal](https://developer.ticktick.com/) and get Client ID and Client Secret.
-   - Set redirect URI to `https://your-domain.com/api/auth/ticktick/callback` (or `http://localhost:3000/api/auth/ticktick/callback` for local).
-   - In `.env.local`: `TICKTICK_CLIENT_ID`, `TICKTICK_CLIENT_SECRET`, `TICKTICK_REDIRECT_URI`.
-   - Optional: register a webhook (e.g. `POST https://your-app.vercel.app/api/webhooks/ticktick`) and set `TICKTICK_WEBHOOK_SECRET`.
+3. **Google Calendar**
+   - In [Google Cloud Console](https://console.cloud.google.com) → APIs & Services → Credentials, create an OAuth 2.0 Client ID (Web application).
+   - Add authorized redirect URI: `https://your-domain.com/api/auth/google/callback` (and `http://localhost:3000/api/auth/google/callback` for local).
+   - Enable the Google Calendar API for the project.
+   - In `.env.local`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`.
 
 4. **Run**
    - `npm run dev` for local development.
-   - Open Settings, connect TickTick, set category mapping and work days, then use Dashboard and “Sync now” to pull completed tasks.
+   - Open **Settings**, connect Google, choose your **Work calendar**, then go to the Dashboard and click **Sync**. Time tracking updates when that calendar changes (push notifications); you can also run Sync manually or via cron.
 
 ## Env vars (see `.env.example`)
 
-- `TICKTICK_CLIENT_ID`, `TICKTICK_CLIENT_SECRET`, `TICKTICK_REDIRECT_URI` – TickTick OAuth
-- `TICKTICK_WEBHOOK_SECRET` – webhook HMAC verification (optional)
-- `DATABASE_URL` or `POSTGRES_URL` – Postgres connection string
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` – Google OAuth (Calendar read-only)
+- `APP_URL` – Public app URL for calendar push notifications (e.g. `https://your-app.vercel.app`). On Vercel, `VERCEL_URL` is set automatically.
+- `CRON_SECRET` – Optional; set in Vercel and use as `Authorization: Bearer <CRON_SECRET>` for the cron job that renews the calendar watch and runs sync.
+- `POSTGRES_URL` or `DATABASE_URL` – Postgres connection string.
 
-Set these in the Vercel project dashboard for production.
+## Real-time updates
 
----
+- When you sync or select your work calendar, the app creates a **watch** on that calendar. Google sends a POST to `/api/webhooks/google-calendar` when events change; the app then syncs and recomputes daily totals.
+- Watches expire after about 7 days. A daily cron job (`/api/cron/sync`) renews the watch and runs a sync. Configure the cron in `vercel.json` and set `CRON_SECRET` in the Vercel dashboard.
 
-## GitHub and Vercel setup
+## GitHub and Vercel
 
-### 1. First commit and push to GitHub
-
-In a terminal (from the project root), run:
-
-```bash
-git init
-git add .
-git commit -m "feat: initial time tracker with TickTick sync and overtime"
-```
-
-Create a new repository on GitHub (do **not** initialize with README if you already have one). Then:
-
-```bash
-git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
-git branch -M main
-git push -u origin main
-```
-
-Replace `YOUR_USERNAME` and `YOUR_REPO` with your GitHub username and repository name.
-
-### 2. Connect to Vercel
-
-1. Go to [vercel.com](https://vercel.com) and sign in (use **Continue with GitHub** if you want).
-2. Click **Add New…** → **Project**.
-3. **Import** your GitHub repository (select the time-tracker repo).
-4. Vercel will detect Next.js. Leave **Build and Output Settings** as default.
-5. Before deploying, open **Environment Variables** and add each variable from `.env.example`:
-   - `TICKTICK_CLIENT_ID`
-   - `TICKTICK_CLIENT_SECRET`
-   - `TICKTICK_REDIRECT_URI` → use your production URL, e.g. `https://your-app.vercel.app/api/auth/ticktick/callback`
-   - `POSTGRES_URL` or `DATABASE_URL` (e.g. from Vercel Postgres: create a store in the Vercel dashboard and copy the connection string)
-   - Optionally: `TICKTICK_WEBHOOK_SECRET`
-6. Click **Deploy**. The first deployment will run from the push you made to `main`.
-
-### 3. After first deploy
-
-- In the TickTick developer portal, add your production redirect URI:  
-  `https://<your-vercel-app>.vercel.app/api/auth/ticktick/callback`
-- If you use Vercel Postgres: create the database, copy `POSTGRES_URL` into the project’s Environment Variables, then run **Redeploy** (or run `npm run db:push` locally with that URL to create tables).
-- Open your Vercel app URL and confirm the home page, Dashboard, and Settings load. Connect TickTick in Settings and use **Sync now** on the Dashboard to verify the pipeline.
+1. Push the repo to GitHub.
+2. In Vercel, import the repo and add environment variables from `.env.example`.
+3. Set `APP_URL` to your Vercel app URL (e.g. `https://your-app.vercel.app`).
+4. After deploy, run the DB migration if needed, then open the app, go to Settings, connect Google, choose your work calendar, and use Sync on the Dashboard.

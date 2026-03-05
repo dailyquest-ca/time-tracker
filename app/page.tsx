@@ -327,8 +327,8 @@ export default function HomePage() {
         ) : data.length === 0 ? (
           <div className="rounded-lg border border-gray-200 bg-white px-5 py-8 text-center text-sm text-gray-500 shadow-sm">
             No hours in this range.{' '}
-            <Link href="/settings" className="underline text-blue-600">Connect TickTick</Link>
-            {' '}then click Sync.
+            <Link href="/settings" className="underline text-blue-600">Connect Google and choose a work calendar</Link>
+            {' '}in Settings, then click Sync.
           </div>
         ) : (
           <div className="rounded-lg border border-gray-200 bg-white shadow-sm">

@@ -7,31 +7,11 @@ import {
   unique,
 } from 'drizzle-orm/pg-core';
 
-/** Legacy type; categories are now free text (TickTick project names). */
-export type WorkCategory = 'work_project' | 'general_task' | 'meeting';
+const USER_ID = 'default';
 
-export const ticktickTokens = pgTable('ticktick_tokens', {
-  userId: text('user_id').primaryKey().default('default'),
-  accessToken: text('access_token').notNull(),
-  refreshToken: text('refresh_token'),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
-
-export const microsoftTokens = pgTable('microsoft_tokens', {
-  userId: text('user_id').primaryKey().default('default'),
-  accessToken: text('access_token').notNull(),
-  refreshToken: text('refresh_token'),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
-
+/** Google OAuth tokens (single user). */
 export const googleTokens = pgTable('google_tokens', {
-  userId: text('user_id').primaryKey().default('default'),
+  userId: text('user_id').primaryKey().default(USER_ID),
   accessToken: text('access_token').notNull(),
   refreshToken: text('refresh_token'),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -40,37 +20,50 @@ export const googleTokens = pgTable('google_tokens', {
     .defaultNow(),
 });
 
-export const syncState = pgTable('sync_state', {
-  userId: text('user_id').primaryKey().default('default'),
-  lastModifiedTime: timestamp('last_modified_time', { withTimezone: true }),
-  microsoftDeltaLink: text('microsoft_delta_link'),
+/** Calendar watch state for push notifications (renew before expiration). */
+export const calendarWatch = pgTable('calendar_watch', {
+  userId: text('user_id').primaryKey().default(USER_ID),
+  calendarId: text('calendar_id').notNull(),
+  channelId: text('channel_id').notNull(),
+  resourceId: text('resource_id').notNull(),
+  expiration: timestamp('expiration', { withTimezone: true }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
 });
 
+/** User-defined categories; archived = still valid for past dates, not for new events. */
+export const categories = pgTable('categories', {
+  id: integer('id').generatedByDefaultAsIdentity().primaryKey(),
+  name: text('name').notNull().unique(),
+  archived: integer('archived').notNull().default(0), // 0 = active, 1 = archived
+  displayOrder: integer('display_order').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/** Work segments: one row per calendar event occurrence. Unique by (calendarId, externalId, date) to avoid double counting. */
 export const workSegments = pgTable(
   'work_segments',
   {
     id: integer('id').generatedByDefaultAsIdentity().primaryKey(),
-    ticktickTaskId: text('ticktick_task_id'),
+    calendarId: text('calendar_id').notNull(),
     externalId: text('external_id').notNull(),
     date: text('date').notNull(),
-    projectId: text('project_id'),
-    projectName: text('project_name'),
-    taskTitle: text('task_title'),
-    tags: jsonb('tags').$type<string[]>().default([]),
+    title: text('title'),
     category: text('category').notNull(),
     durationMinutes: integer('duration_minutes').notNull(),
-    source: text('source').notNull().default('ticktick'),
     startAt: timestamp('start_at', { withTimezone: true }),
     endAt: timestamp('end_at', { withTimezone: true }),
-    completedAt: timestamp('completed_at', { withTimezone: true }),
-    syncedAt: timestamp('synced_at', { withTimezone: true }).notNull().defaultNow(),
+    syncedAt: timestamp('synced_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
-  (t) => [unique().on(t.source, t.externalId, t.date)]
+  (t) => [unique().on(t.calendarId, t.externalId, t.date)]
 );
 
+/** Daily aggregated totals (recomputed after sync). */
 export const dailyTotals = pgTable('daily_totals', {
   date: text('date').primaryKey(),
   totalMinutes: integer('total_minutes').notNull().default(0),
@@ -84,14 +77,7 @@ export const dailyTotals = pgTable('daily_totals', {
     .defaultNow(),
 });
 
-export const categoryMapping = pgTable('category_mapping', {
-  id: integer('id').generatedByDefaultAsIdentity().primaryKey(),
-  type: text('type').notNull(), // 'project' | 'tag'
-  value: text('value').notNull(), // project id/name or tag name
-  category: text('category').$type<WorkCategory>().notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
-
+/** App config key-value (e.g. work_calendar_id). */
 export const appConfig = pgTable('app_config', {
   key: text('key').primaryKey(),
   value: jsonb('value').notNull(),
@@ -100,19 +86,15 @@ export const appConfig = pgTable('app_config', {
     .defaultNow(),
 });
 
-export type InsertTicktickTokens = typeof ticktickTokens.$inferInsert;
-export type SelectTicktickTokens = typeof ticktickTokens.$inferSelect;
-export type InsertMicrosoftTokens = typeof microsoftTokens.$inferInsert;
-export type SelectMicrosoftTokens = typeof microsoftTokens.$inferSelect;
 export type InsertGoogleTokens = typeof googleTokens.$inferInsert;
 export type SelectGoogleTokens = typeof googleTokens.$inferSelect;
-export type InsertSyncState = typeof syncState.$inferInsert;
-export type SelectSyncState = typeof syncState.$inferSelect;
+export type InsertCalendarWatch = typeof calendarWatch.$inferInsert;
+export type SelectCalendarWatch = typeof calendarWatch.$inferSelect;
+export type InsertCategories = typeof categories.$inferInsert;
+export type SelectCategories = typeof categories.$inferSelect;
 export type InsertWorkSegments = typeof workSegments.$inferInsert;
 export type SelectWorkSegments = typeof workSegments.$inferSelect;
 export type InsertDailyTotals = typeof dailyTotals.$inferInsert;
 export type SelectDailyTotals = typeof dailyTotals.$inferSelect;
-export type InsertCategoryMapping = typeof categoryMapping.$inferInsert;
-export type SelectCategoryMapping = typeof categoryMapping.$inferSelect;
 export type InsertAppConfig = typeof appConfig.$inferInsert;
 export type SelectAppConfig = typeof appConfig.$inferSelect;
