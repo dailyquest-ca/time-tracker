@@ -1,0 +1,17 @@
+---
+description: React and Next.js patterns — components, data, routing, a11y
+globs: "app/**/*.tsx"
+alwaysApply: false
+---
+
+# React and Next.js Patterns
+
+**Components:** Use functional components only. Use `'use client'` where state, effects, or browser APIs are needed; keep server components for static or server-fetched content. Prefer server components by default; add client only when necessary.
+
+**Hooks:** Do not call hooks conditionally or in loops. Extract reusable logic into custom hooks; use `useMemo` / `useCallback` only when profiling shows benefit (e.g. expensive computation or stable callback for child props).
+
+**Data:** Fetch from app APIs or server components. In client components, show loading and error states; avoid silent failures. Prefer Server Components and server-side data fetching where possible; use route handlers or server actions as needed.
+
+**Next.js:** Default to App Router. Infer stack from existing config (next.config, package.json). Use route handlers for API-style endpoints; use server actions for mutations when they fit the UX. Follow existing layout and routing patterns in the repo.
+
+**Accessibility:** Semantic HTML, visible focus states, ARIA where needed. Prefer labels and landmarks; avoid horizontal or vertical scroll traps on primary views.

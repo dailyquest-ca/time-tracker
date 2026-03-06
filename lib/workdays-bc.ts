@@ -103,6 +103,8 @@ export function isBCWorkDay(dateKey: string): boolean {
   const dow = d.getUTCDay();
   if (dow === 0 || dow === 6) return false;
   const year = d.getUTCFullYear();
-  const holidays = getHolidaySet(year);
-  return !holidays.has(dateKey);
+  if (getHolidaySet(year).has(dateKey)) return false;
+  // Observed holidays can shift across year boundaries (e.g. New Year 2028 Sat -> Dec 31 2027 Fri)
+  if (getHolidaySet(year + 1).has(dateKey)) return false;
+  return true;
 }

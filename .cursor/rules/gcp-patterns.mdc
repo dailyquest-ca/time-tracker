@@ -1,0 +1,23 @@
+---
+description: GCP patterns — auth, client libraries, and common services
+globs: "**/*.ts"
+alwaysApply: false
+---
+
+# GCP Patterns
+
+**Auth:** Prefer Application Default Credentials (ADC) in local and Cloud Run/Cloud Functions. Use service account keys only when required (e.g. external systems); store in Secret Manager, never in repo.
+
+**Client libraries:** Use official GCP client libraries (e.g. `@google-cloud/firestore`, `@google-cloud/storage`) over raw REST unless you have a specific reason. They handle retries and auth.
+
+**Secrets:** Use Secret Manager for runtime secrets in GCP. Reference by name; do not log or expose secret values.
+
+**Structured logging:** Log JSON to stdout (e.g. `console.log(JSON.stringify({ severity, message, ... }))`) for Cloud Logging. Include request IDs or correlation IDs where relevant.
+
+**Idempotency and retries:** For Pub/Sub, Cloud Tasks, or job handlers, design for at-least-once delivery: make handlers idempotent (e.g. upsert by stable key) and use retries with backoff.
+
+**Common products (use as needed):**
+- **Cloud Run / Cloud Functions:** Stateless handlers; set timeouts and memory appropriately. Use env vars or Secret Manager for config.
+- **Firestore / BigQuery / Cloud SQL:** Use client libs; parameterize queries; avoid raw string concatenation for user input.
+- **Cloud Storage:** Prefer signed URLs or IAM for access; avoid public buckets for sensitive data.
+- **Pub/Sub:** Ensure subscription ack deadline and retry policy match handler latency; dead-letter for repeated failures.

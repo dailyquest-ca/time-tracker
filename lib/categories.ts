@@ -2,9 +2,9 @@ import { db } from './db';
 import { categories } from './schema';
 
 const DEFAULT_CATEGORIES = [
-  'Learning',
-  '1:1s',
-  'General tasks/meetings',
+  { name: 'General tasks/meetings', kind: 'system' as const },
+  { name: 'Learning', kind: 'system' as const },
+  { name: '1:1s', kind: 'system' as const },
 ] as const;
 
 /**
@@ -15,9 +15,10 @@ export async function ensureDefaultCategories(): Promise<void> {
   if (existing.length > 0) return;
 
   await db.insert(categories).values(
-    DEFAULT_CATEGORIES.map((name, i) => ({
-      name,
-      archived: 0,
+    DEFAULT_CATEGORIES.map((c, i) => ({
+      name: c.name,
+      kind: c.kind,
+      archived: false,
       displayOrder: i,
     })),
   );

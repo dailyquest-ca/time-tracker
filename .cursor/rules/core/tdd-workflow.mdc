@@ -1,0 +1,50 @@
+---
+description: Test-driven development workflow — write or update tests before implementing behavior changes.
+alwaysApply: true
+---
+
+# TDD Workflow
+
+This project follows test-driven development. Tests are not an afterthought; they are part of the work.
+
+## Before Starting Work
+
+- Run `npm test` to confirm the existing suite is green. If tests are failing before you start, flag it before making changes.
+- Identify which tests cover the area you are about to change. If none exist, that is the first task.
+
+## The Development Loop
+
+1. **Add or update tests first.** Write the test that describes the new or changed behavior. The test should fail (or not yet exist) before the implementation.
+2. **Implement the change.** Write the minimum code to make the failing test pass.
+3. **Run the relevant suite.** Use `npm test` (or `npm run test:watch` during active development) to confirm the change works and nothing else broke.
+4. **Refactor if needed.** Clean up with confidence — the tests prove correctness.
+
+## When Tests Are Required
+
+- New features or endpoints: tests for the expected behavior.
+- Bug fixes: a regression test that reproduces the bug before the fix.
+- Behavior changes: update existing assertions to reflect the new intent, then verify.
+
+## When Tests Are Not Required
+
+- Pure refactors with no behavior change (existing tests must still pass).
+- Copy, documentation, or config-only changes.
+- Exploratory spikes explicitly marked as throwaway.
+
+## Anti-pattern
+
+Do not write the implementation first and then backfill tests that merely assert what the code already does. That tests the code, not the intent. Write the expectation first so the test has a chance to fail.
+
+```
+BAD workflow:
+  1. Write feature code
+  2. Write tests that pass immediately
+  3. Ship
+
+GOOD workflow:
+  1. Write or update tests describing expected behavior
+  2. See the test fail (or not compile)
+  3. Implement the feature
+  4. See the test pass
+  5. Ship
+```

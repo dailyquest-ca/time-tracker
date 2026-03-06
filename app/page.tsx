@@ -2,6 +2,15 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  fmtHours,
+  dateLabel,
+  topCategories,
+  getPageRange,
+  getYearRange,
+  getPayPeriods,
+  sumByCategory,
+} from '@/lib/format';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
@@ -10,6 +19,8 @@ interface DailyRow {
   totalMinutes: number;
   minutesByCategory: Record<string, number>;
   overtimeBalanceAfter: number;
+  isWorkDay?: boolean;
+  note?: string | null;
 }
 
 interface DayTask {
@@ -26,90 +37,13 @@ interface DayDetail {
   totalMinutes: number;
   byCategory: Record<string, number>;
   overtimeBalanceAfter: number;
+  note?: string | null;
   tasks: DayTask[];
   overtimeDrivers: DayTask[];
 }
 
-/* ── Helpers ───────────────────────────────────────────────────────── */
-
-function fmt(minutes: number): string {
-  const abs = Math.abs(minutes);
-  const h = Math.floor(abs / 60);
-  const m = abs % 60;
-  const sign = minutes < 0 ? '-' : '';
-  if (m === 0) return `${sign}${h}h`;
-  return `${sign}${h}h ${m}m`;
-}
-
-function fmtDecimal(minutes: number): string {
-  return (minutes / 60).toFixed(2);
-}
-
-function dateLabel(dateStr: string): string {
-  const d = new Date(dateStr + 'T12:00:00Z');
-  const day = d.toLocaleDateString('en-CA', { weekday: 'short', timeZone: 'UTC' });
-  const mon = d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-  return `${day}, ${mon}`;
-}
-
-function isWeekend(dateStr: string): boolean {
-  const d = new Date(dateStr + 'T12:00:00Z');
-  const dow = d.getUTCDay();
-  return dow === 0 || dow === 6;
-}
-
 function rangeStr(from: string, to: string): string {
   return `${from} to ${to}`;
-}
-
-function getPageRange(page: number, pageSize: number): { from: string; to: string } {
-  const to = new Date();
-  to.setDate(to.getDate() - page * pageSize);
-  const from = new Date(to);
-  from.setDate(to.getDate() - pageSize + 1);
-  return {
-    from: from.toISOString().slice(0, 10),
-    to: to.toISOString().slice(0, 10),
-  };
-}
-
-function getYearRange(year: number): { from: string; to: string } {
-  return { from: `${year}-01-01`, to: `${year}-12-31` };
-}
-
-function topCategories(mins: Record<string, number>, limit: number): { shown: [string, number][]; extra: number } {
-  const sorted = Object.entries(mins).sort(([, a], [, b]) => b - a);
-  const shown = sorted.slice(0, limit);
-  const extra = sorted.length - shown.length;
-  return { shown, extra };
-}
-
-/* ── Pay period helpers ────────────────────────────────────────────── */
-
-function getPayPeriods(rows: DailyRow[], year: number, month: number): {
-  first: { from: string; to: string; rows: DailyRow[] };
-  second: { from: string; to: string; rows: DailyRow[] };
-} {
-  const mm = String(month).padStart(2, '0');
-  const lastDay = new Date(year, month, 0).getDate();
-  const from1 = `${year}-${mm}-01`;
-  const to1 = `${year}-${mm}-15`;
-  const from2 = `${year}-${mm}-16`;
-  const to2 = `${year}-${mm}-${lastDay}`;
-  return {
-    first: { from: from1, to: to1, rows: rows.filter((r) => r.date >= from1 && r.date <= to1) },
-    second: { from: from2, to: to2, rows: rows.filter((r) => r.date >= from2 && r.date <= to2) },
-  };
-}
-
-function sumByCategory(rows: DailyRow[]): Record<string, number> {
-  const totals: Record<string, number> = {};
-  for (const r of rows) {
-    for (const [cat, mins] of Object.entries(r.minutesByCategory ?? {})) {
-      totals[cat] = (totals[cat] ?? 0) + mins;
-    }
-  }
-  return totals;
 }
 
 /* ── Component ─────────────────────────────────────────────────────── */
@@ -128,6 +62,8 @@ export default function HomePage() {
   // Day detail modal
   const [modalDate, setModalDate] = useState<string | null>(null);
   const [dayDetail, setDayDetail] = useState<DayDetail | null>(null);
+  const [dayNote, setDayNote] = useState('');
+  const [dayNoteSaving, setDayNoteSaving] = useState(false);
   const [dayLoading, setDayLoading] = useState(false);
 
   // Pay period
@@ -202,11 +138,13 @@ export default function HomePage() {
     setModalDate(date);
     setDayLoading(true);
     setDayDetail(null);
+    setDayNote('');
     try {
       const res = await fetch(`/api/day?date=${encodeURIComponent(date)}`);
       if (!res.ok) throw new Error(await res.text());
       const json: DayDetail = await res.json();
       setDayDetail(json);
+      setDayNote(json.note ?? '');
     } catch {
       setDayDetail(null);
     } finally {
@@ -217,19 +155,46 @@ export default function HomePage() {
   const closeModal = () => {
     setModalDate(null);
     setDayDetail(null);
+    setDayNote('');
   };
 
-  // Derived
-  const totalMinutesRange = data.reduce((s, r) => s + r.totalMinutes, 0);
-  const latestOT = data.length > 0 ? data[data.length - 1].overtimeBalanceAfter : 0;
+  const saveDayNote = async () => {
+    if (!modalDate) return;
+    setDayNoteSaving(true);
+    try {
+      const res = await fetch(`/api/day?date=${encodeURIComponent(modalDate)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: dayNote.trim() || null }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const value = dayNote.trim() || null;
+      setDayDetail((prev) => (prev ? { ...prev, note: value } : null));
+    } finally {
+      setDayNoteSaving(false);
+    }
+  };
 
-  // Compute OT delta for each row
+  // Hide future days; hide non-work days with no work (holidays/weekends with zero time)
+  const visibleData = useMemo(() => {
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    return data.filter(
+      (r) => r.date <= todayStr && (r.isWorkDay || r.totalMinutes > 0),
+    );
+  }, [data]);
+
+  const totalMinutesRange = visibleData.reduce((s, r) => s + r.totalMinutes, 0);
+  const latestOT = visibleData.length > 0 ? visibleData[visibleData.length - 1].overtimeBalanceAfter : 0;
+
+  // Compute OT delta for each row (using isWorkDay so holidays don't show -8)
   const dataWithDelta = useMemo(() => {
-    return data.map((r, i) => {
-      const delta = r.overtimeBalanceAfter - (i > 0 ? data[i - 1].overtimeBalanceAfter : r.overtimeBalanceAfter - computeOTDelta(r));
+    return visibleData.map((r, i) => {
+      const prevBal = i > 0 ? visibleData[i - 1].overtimeBalanceAfter : r.overtimeBalanceAfter - computeOTDelta(r);
+      const delta = r.overtimeBalanceAfter - prevBal;
       return { ...r, otDelta: delta };
     });
-  }, [data]);
+  }, [visibleData]);
 
   // Pay period computed
   const pp = useMemo(() => getPayPeriods(ppData, ppYear, ppMonth), [ppData, ppYear, ppMonth]);
@@ -290,16 +255,16 @@ export default function HomePage() {
         </div>
 
         {/* Summary cards */}
-        {!loading && data.length > 0 && (
+        {!loading && visibleData.length > 0 && (
           <div className="mb-3 grid grid-cols-2 gap-3">
             <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
               <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Total</p>
-              <p className="text-lg font-semibold text-gray-900">{fmt(totalMinutesRange)}</p>
+              <p className="text-lg font-semibold text-gray-900">{fmtHours(totalMinutesRange)} h</p>
             </div>
             <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
               <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">OT Balance</p>
               <p className={`text-lg font-semibold ${latestOT > 0 ? 'text-green-600' : 'text-gray-900'}`}>
-                {fmt(latestOT)}
+                {fmtHours(latestOT)} h
               </p>
             </div>
           </div>
@@ -330,7 +295,7 @@ export default function HomePage() {
         {/* Main table */}
         {loading ? (
           <p className="text-gray-400 text-sm py-6 text-center">Loading...</p>
-        ) : data.length === 0 ? (
+        ) : visibleData.length === 0 ? (
           <div className="rounded-lg border border-gray-200 bg-white px-5 py-8 text-center text-sm text-gray-500 shadow-sm">
             No hours in this range.{' '}
             <Link href="/settings" className="underline text-blue-600">Connect Google and choose a work calendar</Link>
@@ -346,13 +311,14 @@ export default function HomePage() {
                   <th className="px-2 py-2 text-left font-semibold">Categories</th>
                   <th className="px-2 py-2 text-right font-semibold">OT &Delta;</th>
                   <th className="px-3 py-2 text-right font-semibold">OT Bal</th>
+                  <th className="px-2 py-2 text-left font-semibold max-w-[140px]">Note</th>
                 </tr>
               </thead>
               <tbody>
                 {[...dataWithDelta].reverse().map((row) => {
                   const today = new Date().toISOString().slice(0, 10);
                   const isToday = row.date === today;
-                  const weekend = isWeekend(row.date);
+                  const notWorkDay = !row.isWorkDay;
                   const { shown, extra } = topCategories(row.minutesByCategory ?? {}, 2);
 
                   return (
@@ -360,14 +326,14 @@ export default function HomePage() {
                       key={row.date}
                       onClick={() => openDay(row.date)}
                       className={`border-b border-gray-100 last:border-0 cursor-pointer transition-colors ${
-                        isToday ? 'bg-blue-50 hover:bg-blue-100' : weekend ? 'bg-gray-50/50 hover:bg-gray-100' : 'hover:bg-gray-50'
+                        isToday ? 'bg-blue-50 hover:bg-blue-100' : notWorkDay ? 'bg-gray-50/50 hover:bg-gray-100' : 'hover:bg-gray-50'
                       }`}
                     >
                       <td className="px-3 py-2 whitespace-nowrap text-gray-700 font-medium">
                         {dateLabel(row.date)}
                       </td>
                       <td className="px-2 py-2 text-right whitespace-nowrap font-semibold text-gray-900">
-                        {row.totalMinutes > 0 ? fmt(row.totalMinutes) : <span className="text-gray-300">&mdash;</span>}
+                        {row.totalMinutes > 0 ? `${fmtHours(row.totalMinutes)} h` : <span className="text-gray-300">&mdash;</span>}
                       </td>
                       <td className="px-2 py-2 text-gray-600 truncate max-w-[180px]">
                         {shown.length > 0 ? (
@@ -375,7 +341,7 @@ export default function HomePage() {
                             {shown.map(([cat, mins]) => (
                               <span key={cat} className="inline-block mr-2">
                                 <span className="text-gray-500">{cat.replace(/^[^\w]*/, '').slice(0, 12)}</span>
-                                <span className="ml-0.5 text-gray-800">{fmtDecimal(mins)}</span>
+                                <span className="ml-0.5 text-gray-800">{fmtHours(mins)}</span>
                               </span>
                             ))}
                             {extra > 0 && <span className="text-gray-400">+{extra}</span>}
@@ -387,12 +353,19 @@ export default function HomePage() {
                       <td className={`px-2 py-2 text-right whitespace-nowrap font-medium ${
                         row.otDelta > 0 ? 'text-green-600' : row.otDelta < 0 ? 'text-red-500' : 'text-gray-300'
                       }`}>
-                        {row.otDelta !== 0 ? (row.otDelta > 0 ? '+' : '') + fmt(row.otDelta) : <span>&mdash;</span>}
+                        {row.otDelta !== 0 ? (row.otDelta > 0 ? '+' : '') + fmtHours(row.otDelta) + ' h' : <span>&mdash;</span>}
                       </td>
                       <td className={`px-3 py-2 text-right whitespace-nowrap font-semibold ${
                         row.overtimeBalanceAfter > 0 ? 'text-green-600' : 'text-gray-400'
                       }`}>
-                        {fmt(row.overtimeBalanceAfter)}
+                        {fmtHours(row.overtimeBalanceAfter)} h
+                      </td>
+                      <td className="px-2 py-2 text-gray-600 truncate max-w-[140px]" title={row.note ?? undefined}>
+                        {row.note ? (
+                          <span className="truncate block">{row.note.length > 28 ? `${row.note.slice(0, 25)}…` : row.note}</span>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -439,16 +412,16 @@ export default function HomePage() {
                 {allPPCategories.map((cat) => (
                   <tr key={cat} className="border-b border-gray-100 last:border-0">
                     <td className="px-3 py-1.5 text-gray-700 truncate max-w-[180px]">{cat}</td>
-                    <td className="px-3 py-1.5 text-right text-gray-800">{fmtDecimal(ppFirstByCat[cat] ?? 0)}</td>
-                    <td className="px-3 py-1.5 text-right text-gray-800">{fmtDecimal(ppSecondByCat[cat] ?? 0)}</td>
-                    <td className="px-3 py-1.5 text-right font-medium text-gray-900">{fmtDecimal((ppFirstByCat[cat] ?? 0) + (ppSecondByCat[cat] ?? 0))}</td>
+                    <td className="px-3 py-1.5 text-right text-gray-800">{fmtHours(ppFirstByCat[cat] ?? 0)}</td>
+                    <td className="px-3 py-1.5 text-right text-gray-800">{fmtHours(ppSecondByCat[cat] ?? 0)}</td>
+                    <td className="px-3 py-1.5 text-right font-medium text-gray-900">{fmtHours((ppFirstByCat[cat] ?? 0) + (ppSecondByCat[cat] ?? 0))}</td>
                   </tr>
                 ))}
                 <tr className="border-t border-gray-200 bg-gray-50 font-semibold">
                   <td className="px-3 py-1.5 text-gray-700">Total</td>
-                  <td className="px-3 py-1.5 text-right text-gray-900">{fmtDecimal(ppFirstTotal)}</td>
-                  <td className="px-3 py-1.5 text-right text-gray-900">{fmtDecimal(ppSecondTotal)}</td>
-                  <td className="px-3 py-1.5 text-right text-gray-900">{fmtDecimal(ppFirstTotal + ppSecondTotal)}</td>
+                  <td className="px-3 py-1.5 text-right text-gray-900">{fmtHours(ppFirstTotal)}</td>
+                  <td className="px-3 py-1.5 text-right text-gray-900">{fmtHours(ppSecondTotal)}</td>
+                  <td className="px-3 py-1.5 text-right text-gray-900">{fmtHours(ppFirstTotal + ppSecondTotal)}</td>
                 </tr>
               </tbody>
             </table>
@@ -483,12 +456,12 @@ export default function HomePage() {
                   <div className="mb-4 flex gap-4 text-xs">
                     <div>
                       <span className="text-gray-500">Total:</span>{' '}
-                      <span className="font-semibold">{fmt(dayDetail.totalMinutes)}</span>
+                      <span className="font-semibold">{fmtHours(dayDetail.totalMinutes)} h</span>
                     </div>
                     <div>
                       <span className="text-gray-500">OT balance:</span>{' '}
                       <span className={`font-semibold ${dayDetail.overtimeBalanceAfter > 0 ? 'text-green-600' : ''}`}>
-                        {fmt(dayDetail.overtimeBalanceAfter)}
+                        {fmtHours(dayDetail.overtimeBalanceAfter)} h
                       </span>
                     </div>
                   </div>
@@ -501,7 +474,7 @@ export default function HomePage() {
                       .map(([cat, mins]) => (
                         <div key={cat} className="flex justify-between">
                           <span className="text-gray-600 truncate max-w-[260px]">{cat}</span>
-                          <span className="text-gray-800 font-medium ml-2 whitespace-nowrap">{fmt(mins)}</span>
+                          <span className="text-gray-800 font-medium ml-2 whitespace-nowrap">{fmtHours(mins)} h</span>
                         </div>
                       ))}
                   </div>
@@ -514,7 +487,7 @@ export default function HomePage() {
                         <span className="text-gray-600 truncate max-w-[280px]" title={t.taskTitle}>
                           {t.taskTitle}
                         </span>
-                        <span className="text-gray-800 font-medium ml-2 whitespace-nowrap">{fmt(t.durationMinutes)}</span>
+                        <span className="text-gray-800 font-medium ml-2 whitespace-nowrap">{fmtHours(t.durationMinutes)} h</span>
                       </div>
                     ))}
                     {dayDetail.tasks.length === 0 && (
@@ -526,16 +499,36 @@ export default function HomePage() {
                   {dayDetail.overtimeDrivers.length > 0 && (
                     <>
                       <h4 className="text-xs font-semibold text-gray-700 mb-1">Overtime Drivers</h4>
-                      <div className="space-y-0.5 text-xs">
+                      <div className="space-y-0.5 text-xs mb-4">
                         {dayDetail.overtimeDrivers.map((t) => (
                           <div key={t.id} className="flex justify-between text-amber-700">
                             <span className="truncate max-w-[280px]" title={t.taskTitle}>{t.taskTitle}</span>
-                            <span className="font-medium ml-2 whitespace-nowrap">{fmt(t.durationMinutes)}</span>
+                            <span className="font-medium ml-2 whitespace-nowrap">{fmtHours(t.durationMinutes)} h</span>
                           </div>
                         ))}
                       </div>
                     </>
                   )}
+
+                  {/* Overtime note (why OT was needed) */}
+                  <h4 className="text-xs font-semibold text-gray-700 mb-1">Overtime note</h4>
+                  <p className="text-xs text-gray-500 mb-1">Why was there overtime? (e.g. deployment, last meeting ran late)</p>
+                  <textarea
+                    value={dayNote}
+                    onChange={(e) => setDayNote(e.target.value)}
+                    placeholder="Add a note…"
+                    rows={3}
+                    className="mb-2 w-full rounded border border-gray-300 px-2 py-1.5 text-sm resize-y"
+                    aria-label="Overtime note"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveDayNote}
+                    disabled={dayNoteSaving}
+                    className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {dayNoteSaving ? 'Saving…' : 'Save note'}
+                  </button>
                 </>
               ) : (
                 <p className="text-xs text-red-500">Failed to load day details</p>
@@ -551,8 +544,7 @@ export default function HomePage() {
 /* ── OT delta helper (computed client-side from daily_totals) ───── */
 
 function computeOTDelta(row: DailyRow): number {
-  const weekend = isWeekend(row.date);
-  if (weekend) {
+  if (!row.isWorkDay) {
     return row.totalMinutes;
   }
   if (row.totalMinutes > 480) {

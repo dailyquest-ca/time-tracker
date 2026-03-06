@@ -9,7 +9,19 @@
     "lint": "next lint",
     "db:generate": "drizzle-kit generate",
     "db:push": "dotenv -e .env.local -- drizzle-kit push",
-    "backfill": "dotenv -e .env.local -- tsx scripts/backfill-csv.ts"
+    "backfill": "dotenv -e .env.local -- tsx scripts/backfill-csv.ts",
+    "reconcile-2025": "tsx scripts/reconcile-2025-csv.ts",
+    "db:migrate:note": "dotenv -e .env.local -- tsx scripts/run-migration-0002.ts",
+    "db:migrate:events": "dotenv -e .env.local -- tsx scripts/run-migration-0003.ts",
+    "db:migrate:notes": "dotenv -e .env.local -- tsx scripts/run-migration-0004.ts",
+    "db:migrate:drop-daily-totals": "dotenv -e .env.local -- tsx scripts/run-migration-0005.ts",
+    "import-csv-notes": "dotenv -e .env.local -- tsx scripts/import-csv-notes.ts",
+    "import-2025-daily-values": "dotenv -e .env.local -- tsx scripts/import-2025-csv-daily-values.ts",
+    "import-2026-to-events": "dotenv -e .env.local -- tsx scripts/import-2026-csv-to-events.ts",
+    "db:migrate:fresh": "dotenv -e .env.local -- tsx scripts/run-migration-0006.ts",
+    "import-csv": "dotenv -e .env.local -- tsx scripts/import-csv-to-events.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@vercel/postgres": "^0.10.0",
@@ -23,6 +35,7 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.1.4",
     "dotenv-cli": "^7.4.0",
     "drizzle-kit": "^0.28.0",
     "eslint": "^8.57.0",
@@ -30,6 +43,7 @@
     "postcss": "^8.0.0",
     "tailwindcss": "^3.4.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.18"
   }
 }

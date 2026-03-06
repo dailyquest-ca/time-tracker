@@ -1,0 +1,14 @@
+---
+description: Project context — stack, entrypoints, and conventions (fill per repo)
+alwaysApply: true
+---
+
+# Project Context
+
+**This repo:** Brief description — e.g. Next.js app with serverless API and Postgres. Fill per repo.
+
+**Stack:** Infer from existing config (next.config, package.json). Use the repo's package manager (pnpm/npm/yarn) and lockfile; do not switch mid-project.
+
+**Key locations:** List main entrypoints — e.g. lib/ for shared logic, app/api/ for routes, schema and DB client paths. Add or remove as needed for this project.
+
+**Conventions:** Note any project-specific norms — e.g. single-tenant vs multi-tenant, how cron or webhook auth is done, naming for env vars. Keep this short; detailed patterns live in other rules.

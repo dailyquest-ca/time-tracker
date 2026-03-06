@@ -4,8 +4,8 @@ import {
   appConfig,
   calendarWatch,
   categories,
+  events as eventsTable,
   googleTokens,
-  workSegments,
 } from './schema';
 import {
   createCalendarWatch,
@@ -14,14 +14,14 @@ import {
   refreshGoogleToken,
 } from './google';
 import { recomputeDailyTotalsForDates } from './overtime';
-import { resolveCategory, type CategoryRow } from './categorize';
+import { resolveCategoryId, type CategoryRow } from './categorize';
 import { ensureDefaultCategories } from './categories';
 
 const USER_ID = 'default';
 const ROLLING_PAST_DAYS = 90;
 const ROLLING_FUTURE_DAYS = 30;
 
-function roundToNearest15(minutes: number): number {
+export function roundToNearest15(minutes: number): number {
   if (minutes <= 0) return 0;
   return Math.round(minutes / 15) * 15;
 }
@@ -80,25 +80,24 @@ export async function getWorkCalendarId(): Promise<string | null> {
   return typeof val === 'string' ? val : null;
 }
 
-function isAllDayEvent(event: GoogleCalendarEvent): boolean {
+export function isAllDayEvent(event: GoogleCalendarEvent): boolean {
   return !event.start.dateTime;
 }
 
-function eventDateKey(event: GoogleCalendarEvent): string {
+export function eventDateKey(event: GoogleCalendarEvent): string {
   if (event.start.dateTime) {
     return new Date(event.start.dateTime).toISOString().slice(0, 10);
   }
   return event.start.date!;
 }
 
-function eventDurationMinutes(event: GoogleCalendarEvent): number {
+export function eventDurationMinutes(event: GoogleCalendarEvent): number {
   const start = new Date(event.start.dateTime!).getTime();
   const end = new Date(event.end.dateTime!).getTime();
   return Math.round((end - start) / 60_000);
 }
 
-/** Stable external id for deduplication: event id or recurring instance id. */
-function stableExternalId(event: GoogleCalendarEvent): string {
+export function stableExternalId(event: GoogleCalendarEvent): string {
   if (event.recurringEventId && event.start.dateTime) {
     return `${event.recurringEventId}:${event.start.dateTime}`;
   }
@@ -137,18 +136,23 @@ export async function runGoogleCalendarSync(): Promise<{
       now + ROLLING_FUTURE_DAYS * 24 * 60 * 60 * 1000,
     ).toISOString();
 
-    const events = await listCalendarEvents(accessToken, calendarId, {
+    const calendarEvents = await listCalendarEvents(accessToken, calendarId, {
       timeMin,
       timeMax,
     });
 
-    const relevant = events.filter(
+    const relevant = calendarEvents.filter(
       (e) => !isAllDayEvent(e) && e.status !== 'cancelled',
     );
 
-    const categoryRows: CategoryRow[] = await db
-      .select({ id: categories.id, name: categories.name, archived: categories.archived })
+    let categoryRows: CategoryRow[] = await db
+      .select({
+        id: categories.id,
+        name: categories.name,
+        archived: categories.archived,
+      })
       .from(categories);
+
     const affectedDates = new Set<string>();
     const seenKeys = new Set<string>();
 
@@ -158,63 +162,86 @@ export async function runGoogleCalendarSync(): Promise<{
       if (durationMinutes <= 0) continue;
 
       const externalId = stableExternalId(event);
-      const key = `${calendarId}:${externalId}:${dateKey}`;
+      const sourceId = `${calendarId}:${externalId}`;
+      const key = `${sourceId}`;
       seenKeys.add(key);
 
       const title = event.summary ?? '';
-      const category = resolveCategory(title, categoryRows);
+      const prevCategoryCount = categoryRows.length;
+      const categoryId = await resolveCategoryId(title, categoryRows);
+      const lengthHours = (durationMinutes / 60).toFixed(2);
+
+      const startTime = event.start.dateTime
+        ? new Date(event.start.dateTime)
+        : null;
+      const endTime = event.end.dateTime
+        ? new Date(event.end.dateTime)
+        : null;
 
       affectedDates.add(dateKey);
 
       await db
-        .insert(workSegments)
+        .insert(eventsTable)
         .values({
-          calendarId,
-          externalId,
           date: dateKey,
-          title: title || null,
-          category,
-          durationMinutes,
-          startAt: new Date(event.start.dateTime!),
-          endAt: new Date(event.end.dateTime!),
+          name: title || 'Event',
+          categoryId,
+          lengthHours,
+          sourceType: 'google',
+          sourceId,
+          sourceGroup: `google:${calendarId}`,
+          startTime,
+          endTime,
+          rawTitle: title || null,
+          updatedAt: new Date(),
         })
         .onConflictDoUpdate({
-          target: [workSegments.calendarId, workSegments.externalId, workSegments.date],
+          target: [eventsTable.sourceType, eventsTable.sourceId],
           set: {
-            title: title || null,
-            category,
-            durationMinutes,
-            startAt: new Date(event.start.dateTime!),
-            endAt: new Date(event.end.dateTime!),
-            syncedAt: new Date(),
+            date: dateKey,
+            name: title || 'Event',
+            categoryId,
+            lengthHours,
+            startTime,
+            endTime,
+            rawTitle: title || null,
+            updatedAt: new Date(),
           },
         });
+
+      if (!categoryRows.some((c) => c.id === categoryId) || categoryRows.length !== prevCategoryCount) {
+        categoryRows = await db
+          .select({
+            id: categories.id,
+            name: categories.name,
+            archived: categories.archived,
+          })
+          .from(categories);
+      }
     }
 
     const minDate = new Date(timeMin.slice(0, 10)).toISOString().slice(0, 10);
     const maxDate = new Date(timeMax.slice(0, 10)).toISOString().slice(0, 10);
 
     const existingInRange = await db
-      .select({ externalId: workSegments.externalId, date: workSegments.date })
-      .from(workSegments)
+      .select({ sourceId: eventsTable.sourceId, date: eventsTable.date })
+      .from(eventsTable)
       .where(
         and(
-          eq(workSegments.calendarId, calendarId),
-          gte(workSegments.date, minDate),
-          lte(workSegments.date, maxDate),
+          eq(eventsTable.sourceType, 'google'),
+          gte(eventsTable.date, minDate),
+          lte(eventsTable.date, maxDate),
         )
       );
 
     for (const row of existingInRange) {
-      const key = `${calendarId}:${row.externalId}:${row.date}`;
-      if (!seenKeys.has(key)) {
+      if (!seenKeys.has(row.sourceId)) {
         await db
-          .delete(workSegments)
+          .delete(eventsTable)
           .where(
             and(
-              eq(workSegments.calendarId, calendarId),
-              eq(workSegments.externalId, row.externalId),
-              eq(workSegments.date, row.date),
+              eq(eventsTable.sourceType, 'google'),
+              eq(eventsTable.sourceId, row.sourceId),
             )
           );
         affectedDates.add(row.date);
@@ -237,16 +264,12 @@ export async function runGoogleCalendarSync(): Promise<{
   }
 }
 
-/** Base URL for webhook (e.g. https://your-app.vercel.app). */
 function getWebhookBaseUrl(): string {
   const url = process.env.APP_URL ?? process.env.VERCEL_URL;
   if (!url) return '';
   return url.startsWith('http') ? url : `https://${url}`;
 }
 
-/**
- * Create or replace the calendar watch so we get push notifications on calendar changes.
- */
 export async function ensureCalendarWatch(): Promise<{
   ok: boolean;
   error?: string;
@@ -255,21 +278,21 @@ export async function ensureCalendarWatch(): Promise<{
   if (!accessToken) {
     return { ok: false, error: 'Not connected to Google.' };
   }
-  const calendarId = await getWorkCalendarId();
-  if (!calendarId) {
+  const calId = await getWorkCalendarId();
+  if (!calId) {
     return { ok: false, error: 'No work calendar selected.' };
   }
   const base = getWebhookBaseUrl();
   if (!base) {
-    console.warn('[watch] Not created: APP_URL and VERCEL_URL are both unset. Google cannot send push notifications.');
+    console.warn('[watch] Not created: APP_URL and VERCEL_URL are both unset.');
     return { ok: false, error: 'APP_URL or VERCEL_URL not set; cannot create watch.' };
   }
   const address = `${base}/api/webhooks/google-calendar`;
   if (base.includes('localhost')) {
-    console.warn('[watch] base URL contains localhost — Google cannot reach this. Set APP_URL to your public URL (e.g. https://your-app.vercel.app) for live updates.');
+    console.warn('[watch] base URL contains localhost — Google cannot reach this.');
   }
   try {
-    const channel = await createCalendarWatch(accessToken, calendarId, address, {
+    const channel = await createCalendarWatch(accessToken, calId, address, {
       ttlSeconds: 7 * 24 * 60 * 60 - 60,
     });
     const expiration = new Date(Number(channel.expiration));
@@ -277,7 +300,7 @@ export async function ensureCalendarWatch(): Promise<{
       .insert(calendarWatch)
       .values({
         userId: USER_ID,
-        calendarId,
+        calendarId: calId,
         channelId: channel.id,
         resourceId: channel.resourceId,
         expiration,
@@ -286,13 +309,13 @@ export async function ensureCalendarWatch(): Promise<{
       .onConflictDoUpdate({
         target: calendarWatch.userId,
         set: {
-          calendarId,
+          calendarId: calId,
           channelId: channel.id,
           resourceId: channel.resourceId,
           expiration,
           updatedAt: new Date(),
         },
-      }    );
+      });
     console.warn('[watch] Created: Google will POST to', address);
     return { ok: true };
   } catch (err) {
@@ -302,7 +325,6 @@ export async function ensureCalendarWatch(): Promise<{
   }
 }
 
-/** Renew the calendar watch if it expires within the next 24 hours. */
 export async function renewCalendarWatchIfNeeded(): Promise<boolean> {
   const rows = await db.select().from(calendarWatch).where(eq(calendarWatch.userId, USER_ID)).limit(1);
   if (rows.length === 0) return false;

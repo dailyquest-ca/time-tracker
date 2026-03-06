@@ -1,0 +1,15 @@
+---
+description: API route conventions — auth, responses, validation
+globs: "app/api/**/*.ts"
+alwaysApply: false
+---
+
+# API Route Conventions
+
+**Auth:** For cron or webhook endpoints, require a shared secret (e.g. `Authorization: Bearer <SECRET>` or a dedicated header). Return 401 when missing or invalid. Do not expose which part of the check failed.
+
+**Responses:** Return JSON. Use correct status codes: 400 (bad input), 401 (unauthorized), 404 (not found), 500 (server error). On failure return a consistent shape such as `{ error: string }` or a structured error object. Never include secrets in response bodies or logs.
+
+**Validation:** Validate required query/body params (e.g. date as YYYY-MM-DD, IDs as expected format). Return 400 with a clear message when validation fails.
+
+**Missing config:** If a required env var is missing for the code path, return 500 with a generic message (e.g. "Server misconfigured"); do not include the env var name or value in the response or logs.

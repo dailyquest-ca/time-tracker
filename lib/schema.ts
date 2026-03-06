@@ -1,7 +1,11 @@
 import {
+  boolean,
+  date,
   integer,
   jsonb,
+  numeric,
   pgTable,
+  serial,
   text,
   timestamp,
   unique,
@@ -32,52 +36,60 @@ export const calendarWatch = pgTable('calendar_watch', {
     .defaultNow(),
 });
 
-/** User-defined categories; archived = still valid for past dates, not for new events. */
+/** Canonical category definitions. Events reference categories by id. */
 export const categories = pgTable('categories', {
-  id: integer('id').generatedByDefaultAsIdentity().primaryKey(),
+  id: serial('id').primaryKey(),
   name: text('name').notNull().unique(),
-  archived: integer('archived').notNull().default(0), // 0 = active, 1 = archived
+  kind: text('kind').notNull().default('manual'),
+  archived: boolean('archived').notNull().default(false),
   displayOrder: integer('display_order').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
-});
-
-/** Work segments: one row per calendar event occurrence. Unique by (calendarId, externalId, date) to avoid double counting. */
-export const workSegments = pgTable(
-  'work_segments',
-  {
-    id: integer('id').generatedByDefaultAsIdentity().primaryKey(),
-    calendarId: text('calendar_id').notNull(),
-    externalId: text('external_id').notNull(),
-    date: text('date').notNull(),
-    title: text('title'),
-    category: text('category').notNull(),
-    durationMinutes: integer('duration_minutes').notNull(),
-    startAt: timestamp('start_at', { withTimezone: true }),
-    endAt: timestamp('end_at', { withTimezone: true }),
-    syncedAt: timestamp('synced_at', { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [unique().on(t.calendarId, t.externalId, t.date)]
-);
-
-/** Daily aggregated totals (recomputed after sync). */
-export const dailyTotals = pgTable('daily_totals', {
-  date: text('date').primaryKey(),
-  totalMinutes: integer('total_minutes').notNull().default(0),
-  minutesByCategory: jsonb('minutes_by_category')
-    .$type<Record<string, number>>()
-    .notNull()
-    .default({}),
-  overtimeBalanceAfter: integer('overtime_balance_after').notNull().default(0),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
 });
 
-/** App config key-value (e.g. work_calendar_id). */
+/** Canonical fact table for all tracked time. One row per time entry. */
+export const events = pgTable(
+  'events',
+  {
+    id: serial('id').primaryKey(),
+    date: date('date', { mode: 'string' }).notNull(),
+    name: text('name').notNull(),
+    categoryId: integer('category_id')
+      .notNull()
+      .references(() => categories.id),
+    lengthHours: numeric('length_hours', { precision: 6, scale: 2 })
+      .notNull(),
+    sourceType: text('source_type').notNull().default('manual'),
+    sourceId: text('source_id').notNull(),
+    sourceGroup: text('source_group'),
+    startTime: timestamp('start_time', { withTimezone: true }),
+    endTime: timestamp('end_time', { withTimezone: true }),
+    rawTitle: text('raw_title'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [unique().on(t.sourceType, t.sourceId)]
+);
+
+/** Overtime notes per day. One row per date, user-editable. */
+export const dailyOvertimeNotes = pgTable('daily_overtime_notes', {
+  date: date('date', { mode: 'string' }).primaryKey(),
+  note: text('note'),
+  noteSource: text('note_source'),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/** App config key-value store (e.g. work_calendar_id, overtime settings). */
 export const appConfig = pgTable('app_config', {
   key: text('key').primaryKey(),
   value: jsonb('value').notNull(),
@@ -92,9 +104,9 @@ export type InsertCalendarWatch = typeof calendarWatch.$inferInsert;
 export type SelectCalendarWatch = typeof calendarWatch.$inferSelect;
 export type InsertCategories = typeof categories.$inferInsert;
 export type SelectCategories = typeof categories.$inferSelect;
-export type InsertWorkSegments = typeof workSegments.$inferInsert;
-export type SelectWorkSegments = typeof workSegments.$inferSelect;
-export type InsertDailyTotals = typeof dailyTotals.$inferInsert;
-export type SelectDailyTotals = typeof dailyTotals.$inferSelect;
+export type InsertEvents = typeof events.$inferInsert;
+export type SelectEvents = typeof events.$inferSelect;
+export type InsertDailyOvertimeNotes = typeof dailyOvertimeNotes.$inferInsert;
+export type SelectDailyOvertimeNotes = typeof dailyOvertimeNotes.$inferSelect;
 export type InsertAppConfig = typeof appConfig.$inferInsert;
 export type SelectAppConfig = typeof appConfig.$inferSelect;

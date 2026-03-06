@@ -1,0 +1,15 @@
+---
+description: Data and persistence — idempotent writes, aggregates, migrations
+globs: "lib/*.ts,scripts/**/*.ts"
+alwaysApply: false
+---
+
+# Data and Persistence
+
+**Idempotent upserts:** For tables with a natural unique key (e.g. source + external id + date), use upsert semantics: `onConflictDoUpdate` or equivalent so re-runs do not create duplicates. Prefer updating in place over delete-then-insert when re-syncing.
+
+**Derived data:** After inserting, updating, or deleting rows that affect aggregates or summary tables, recompute those aggregates for the affected scope (e.g. affected dates or IDs). Keep derived tables in sync in the same flow or a dedicated job.
+
+**Units and rounding:** Document and apply consistent units (e.g. minutes, cents) and rounding rules before persisting. Enforce minimums (e.g. non-negative) where applicable.
+
+**Migrations and schema:** Put migrations in a dedicated folder (e.g. `drizzle/`, `scripts/migrations/`). Use project scripts (e.g. `db:generate`, `db:push`) with env for applying changes. Never commit raw DB credentials or connection strings.

@@ -1,20 +1,28 @@
 import { db } from '../lib/db';
-import { workSegments } from '../lib/schema';
-import { desc } from 'drizzle-orm';
+import { categories, events } from '../lib/schema';
+import { desc, eq } from 'drizzle-orm';
 
 async function main() {
   const rows = await db
-    .select()
-    .from(workSegments)
-    .orderBy(desc(workSegments.syncedAt))
+    .select({
+      date: events.date,
+      name: events.name,
+      categoryName: categories.name,
+      lengthHours: events.lengthHours,
+    })
+    .from(events)
+    .innerJoin(categories, eq(events.categoryId, categories.id))
+    .orderBy(desc(events.updatedAt))
     .limit(10);
 
   if (rows.length === 0) {
-    console.log('No work segments found in the database.');
+    console.log('No events found in the database.');
   } else {
-    console.log(`Found ${rows.length} segment(s):\n`);
+    console.log(`Found ${rows.length} event(s):\n`);
     for (const r of rows) {
-      console.log(`  ${r.date} | ${r.category} | ${r.title ?? '(no title)'} | ${r.durationMinutes} min`);
+      const hours = parseFloat(r.lengthHours ?? '0');
+      const mins = Math.round(hours * 60);
+      console.log(`  ${r.date} | ${r.categoryName} | ${r.name ?? '(no name)'} | ${hours} h (${mins} min)`);
     }
   }
   process.exit(0);

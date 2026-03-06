@@ -1,0 +1,30 @@
+---
+description: TypeScript standards — strict typing, errors, and boundaries
+globs: "**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# TypeScript Standards
+
+**Strict mode:** Use TypeScript strict mode. Avoid `any`; prefer `unknown` for truly dynamic values and narrow before use.
+
+**Types at boundaries:** Type API responses, component props, and shared function signatures explicitly. Prefer inference for local variables; add types where they document contracts or catch mistakes.
+
+**Error handling:**
+- In `catch`, type as `unknown` and normalize before rethrowing or logging.
+- Use typed error classes or structured `{ error: string; code?: string }` for API errors.
+
+```ts
+// Prefer
+try {
+  await fetchData();
+} catch (e) {
+  const message = e instanceof Error ? e.message : 'Unknown error';
+  logger.error('Failed to fetch', { error: message });
+  throw new DataFetchError('Unable to retrieve data', { cause: e });
+}
+```
+
+**Discriminated unions:** Use for API payloads and state (e.g. `{ status: 'ok'; data } | { status: 'error'; error }`) so branches are type-safe.
+
+**Modern TS:** Use `satisfies` where you need inference plus a type check; use narrowing (type guards, `in`, discriminated fields) instead of assertions when possible.

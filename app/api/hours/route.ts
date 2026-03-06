@@ -1,4 +1,5 @@
 import { getDailyTotalsInRange } from '@/lib/overtime';
+import { isBCWorkDay } from '@/lib/workdays-bc';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(request: NextRequest) {
@@ -26,7 +27,8 @@ export async function GET(request: NextRequest) {
   }
   try {
     const rows = await getDailyTotalsInRange(from, to);
-    return NextResponse.json({ data: rows });
+    const data = rows.map((r) => ({ ...r, isWorkDay: isBCWorkDay(r.date) }));
+    return NextResponse.json({ data });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });

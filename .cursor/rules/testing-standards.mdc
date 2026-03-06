@@ -1,0 +1,59 @@
+---
+description: Testing standards — test levels, file placement, and patterns for TypeScript code.
+globs: "**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# Testing Standards
+
+Tests live in `lib/__tests__/` as `*.test.ts` files. The test runner is **Vitest** with path alias `@/*` mapped to the repo root.
+
+## Choosing the Right Test Level
+
+| Code location | Test type | What to test |
+|---------------|-----------|--------------|
+| `lib/*.ts` (pure helpers) | Unit test | Inputs, outputs, edge cases. No mocking needed. |
+| `lib/*.ts` (DB-dependent) | Unit test with mocked `@/lib/db` | Business logic, not SQL correctness. |
+| `app/api/**/route.ts` | Integration test with mocked DB | Input validation, status codes, error shapes. |
+| Extracted UI helpers | Unit test | Formatting, computation, data transforms. |
+
+Prefer unit tests. Use integration tests for boundaries (API routes, external service calls). Do not write end-to-end tests in this suite.
+
+## Writing Tests
+
+- **Name the test file** after the module: `lib/__tests__/categorize.test.ts` tests `lib/categorize.ts`.
+- **Describe blocks** mirror the exported function or concept being tested.
+- **Each `it` block** tests one behavior, named as a sentence: `it('returns null for 2-letter prefixes')`.
+- **Test the contract, not the implementation.** Assert on return values and side effects, not internal state.
+
+```ts
+// GOOD — tests behavior
+it('extracts acronym from title with 3+ uppercase letters', () => {
+  expect(extractAcronym('PIS Standup')).toBe('PIS');
+});
+
+// BAD — tests implementation detail
+it('calls regex.match internally', () => {
+  const spy = vi.spyOn(String.prototype, 'match');
+  extractAcronym('PIS Standup');
+  expect(spy).toHaveBeenCalled();
+});
+```
+
+## Mocking
+
+- Mock `@/lib/db` at the top of the test file with `vi.mock` for any module that touches the database.
+- Use `NextRequest` from `next/server` (via `require`) to construct test requests for API route tests.
+- Do not mock pure helper imports; test them directly.
+
+## Running Tests
+
+- **During development:** `npm run test:watch` re-runs on file changes.
+- **Before finishing work:** `npm test` runs the full suite once and exits.
+- **Targeted run:** `npx vitest run lib/__tests__/categorize.test.ts` for a single file.
+
+## Anti-patterns
+
+- Do not write snapshot tests for data structures that change frequently.
+- Do not assert on exact error message strings unless the message is part of the API contract.
+- Do not skip (`it.skip`) tests without a comment explaining why and a plan to re-enable.
