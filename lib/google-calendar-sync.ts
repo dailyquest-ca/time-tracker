@@ -252,6 +252,8 @@ export async function runGoogleCalendarSync(): Promise<{
       await recomputeDailyTotalsForDates(Array.from(affectedDates));
     }
 
+    await stampLastSyncedAt();
+
     await ensureCalendarWatch().catch((e) =>
       console.warn('[google-sync] Watch ensure failed:', e),
     );
@@ -323,6 +325,29 @@ export async function ensureCalendarWatch(): Promise<{
     console.error(`[google-sync] Watch create failed: ${message}`);
     return { ok: false, error: message };
   }
+}
+
+const LAST_SYNCED_KEY = 'last_synced_at';
+
+export async function stampLastSyncedAt(): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .insert(appConfig)
+    .values({ key: LAST_SYNCED_KEY, value: now, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: appConfig.key,
+      set: { value: now, updatedAt: new Date() },
+    });
+}
+
+export async function getLastSyncedAt(): Promise<string | null> {
+  const rows = await db
+    .select()
+    .from(appConfig)
+    .where(eq(appConfig.key, LAST_SYNCED_KEY))
+    .limit(1);
+  const val = rows[0]?.value;
+  return typeof val === 'string' ? val : null;
 }
 
 export async function renewCalendarWatchIfNeeded(): Promise<boolean> {

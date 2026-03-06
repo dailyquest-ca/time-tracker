@@ -58,6 +58,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
 
   // Day detail modal
   const [modalDate, setModalDate] = useState<string | null>(null);
@@ -95,17 +96,28 @@ export default function HomePage() {
   }, [range.from, range.to, fetchHours]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchHours(range.from, range.to, true);
-      const mm = String(ppMonth).padStart(2, '0');
-      const lastDay = new Date(ppYear, ppMonth, 0).getDate();
-      fetch(`/api/hours?from=${ppYear}-${mm}-01&to=${ppYear}-${mm}-${lastDay}`)
-        .then((res) => res.json())
-        .then((json) => setPpData(json.data ?? []))
-        .catch(() => {});
-    }, 30_000);
+    let knownSync = lastSyncedAt;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/sync/status');
+        if (!res.ok) return;
+        const json = await res.json();
+        const remote: string | null = json.lastSyncedAt ?? null;
+        if (remote && remote !== knownSync) {
+          knownSync = remote;
+          setLastSyncedAt(remote);
+          fetchHours(range.from, range.to, true);
+          const mm = String(ppMonth).padStart(2, '0');
+          const lastDay = new Date(ppYear, ppMonth, 0).getDate();
+          fetch(`/api/hours?from=${ppYear}-${mm}-01&to=${ppYear}-${mm}-${lastDay}`)
+            .then((r) => r.json())
+            .then((j) => setPpData(j.data ?? []))
+            .catch(() => {});
+        }
+      } catch { /* network error, ignore until next tick */ }
+    }, 5_000);
     return () => clearInterval(interval);
-  }, [range.from, range.to, fetchHours, ppMonth, ppYear]);
+  }, [range.from, range.to, fetchHours, ppMonth, ppYear, lastSyncedAt]);
 
   // Fetch pay period data
   useEffect(() => {
@@ -126,6 +138,7 @@ export default function HomePage() {
       const res = await fetch('/api/sync', { method: 'POST' });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Sync failed');
+      setLastSyncedAt(new Date().toISOString());
       await fetchHours(range.from, range.to);
     } catch (e) {
       setSyncError(e instanceof Error ? e.message : 'Sync failed');
@@ -220,9 +233,10 @@ export default function HomePage() {
               type="button"
               onClick={handleSyncNow}
               disabled={syncing}
-              className="rounded bg-blue-600 px-3 py-1 text-white hover:bg-blue-700 disabled:opacity-50 text-xs font-medium"
+              className="text-gray-400 hover:text-gray-600 disabled:opacity-50 text-xs"
+              title="Force a manual sync with Google Calendar"
             >
-              {syncing ? 'Syncing…' : 'Sync now'}
+              {syncing ? 'Syncing…' : 'Sync'}
             </button>
             <Link href="/settings" className="text-gray-500 hover:text-gray-800 underline text-xs">
               Settings

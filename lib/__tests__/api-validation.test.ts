@@ -56,6 +56,7 @@ vi.mock('@/lib/google-calendar-sync', () => ({
   runGoogleCalendarSync: vi.fn().mockResolvedValue({ ok: true, segmentsProcessed: 0 }),
   getValidGoogleToken: vi.fn().mockResolvedValue(null),
   ensureCalendarWatch: vi.fn().mockResolvedValue({ ok: true }),
+  getLastSyncedAt: vi.fn().mockResolvedValue('2026-03-05T12:00:00.000Z'),
 }));
 
 // NextRequest needs a full URL to populate nextUrl.searchParams
@@ -215,5 +216,54 @@ describe('POST /api/sync', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
+  });
+});
+
+describe('GET /api/sync/status', () => {
+  let GET: () => Promise<Response>;
+
+  beforeEach(async () => {
+    const mod = await import('@/app/api/sync/status/route');
+    GET = mod.GET as unknown as () => Promise<Response>;
+  });
+
+  it('returns 200 with lastSyncedAt', async () => {
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toHaveProperty('lastSyncedAt');
+    expect(body.lastSyncedAt).toBe('2026-03-05T12:00:00.000Z');
+  });
+});
+
+describe('POST /api/webhooks/google-calendar', () => {
+  let POST: (req: Request) => Promise<Response>;
+
+  beforeEach(async () => {
+    const mod = await import('@/app/api/webhooks/google-calendar/route');
+    POST = mod.POST as unknown as (req: Request) => Promise<Response>;
+  });
+
+  it('returns 400 when channel id header is missing', async () => {
+    const req = await makeNextRequest('/api/webhooks/google-calendar', {
+      method: 'POST',
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain('channel');
+  });
+
+  it('returns 403 for unknown channel id', async () => {
+    const req = await makeNextRequest('/api/webhooks/google-calendar', {
+      method: 'POST',
+      headers: {
+        'x-goog-channel-id': 'unknown-channel',
+        'x-goog-resource-state': 'exists',
+        'x-goog-resource-id': 'some-resource',
+      },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(403);
   });
 });
