@@ -59,8 +59,8 @@ vi.mock('@/lib/google-calendar-sync', () => ({
 }));
 
 // NextRequest needs a full URL to populate nextUrl.searchParams
-function makeNextRequest(url: string, init?: RequestInit) {
-  const { NextRequest: NR } = require('next/server');
+async function makeNextRequest(url: string, init?: RequestInit) {
+  const { NextRequest: NR } = await import('next/server');
   return new NR(new URL(url, 'http://localhost:3000'), init);
 }
 
@@ -73,28 +73,28 @@ describe('GET /api/hours validation', () => {
   });
 
   it('returns 400 when from/to are missing', async () => {
-    const res = await GET(makeNextRequest('/api/hours'));
+    const res = await GET(await makeNextRequest('/api/hours'));
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toContain('from');
   });
 
   it('returns 400 when from is invalid format', async () => {
-    const res = await GET(makeNextRequest('/api/hours?from=2026-1-1&to=2026-03-01'));
+    const res = await GET(await makeNextRequest('/api/hours?from=2026-1-1&to=2026-03-01'));
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toContain('YYYY-MM-DD');
   });
 
   it('returns 400 when from > to', async () => {
-    const res = await GET(makeNextRequest('/api/hours?from=2026-03-10&to=2026-03-01'));
+    const res = await GET(await makeNextRequest('/api/hours?from=2026-03-10&to=2026-03-01'));
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toContain('from must be <= to');
   });
 
   it('returns 200 with valid params', async () => {
-    const res = await GET(makeNextRequest('/api/hours?from=2026-03-01&to=2026-03-05'));
+    const res = await GET(await makeNextRequest('/api/hours?from=2026-03-01&to=2026-03-05'));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data).toBeDefined();
@@ -110,14 +110,14 @@ describe('GET /api/day validation', () => {
   });
 
   it('returns 400 when date is missing', async () => {
-    const res = await GET(makeNextRequest('/api/day'));
+    const res = await GET(await makeNextRequest('/api/day'));
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toContain('date');
   });
 
   it('returns 400 for invalid date format', async () => {
-    const res = await GET(makeNextRequest('/api/day?date=March5'));
+    const res = await GET(await makeNextRequest('/api/day?date=March5'));
     expect(res.status).toBe(400);
   });
 });
@@ -131,7 +131,7 @@ describe('PATCH /api/day validation', () => {
   });
 
   it('returns 400 when date is missing', async () => {
-    const res = await PATCH(makeNextRequest('/api/day', {
+    const res = await PATCH(await makeNextRequest('/api/day', {
       method: 'PATCH',
       body: JSON.stringify({ note: 'test' }),
       headers: { 'Content-Type': 'application/json' },
@@ -140,7 +140,7 @@ describe('PATCH /api/day validation', () => {
   });
 
   it('returns 400 for invalid JSON body', async () => {
-    const res = await PATCH(makeNextRequest('/api/day?date=2026-03-05', {
+    const res = await PATCH(await makeNextRequest('/api/day?date=2026-03-05', {
       method: 'PATCH',
       body: 'not json',
       headers: { 'Content-Type': 'application/json' },
@@ -151,7 +151,7 @@ describe('PATCH /api/day validation', () => {
   });
 
   it('returns 400 when note field is missing from body', async () => {
-    const res = await PATCH(makeNextRequest('/api/day?date=2026-03-05', {
+    const res = await PATCH(await makeNextRequest('/api/day?date=2026-03-05', {
       method: 'PATCH',
       body: JSON.stringify({ somethingElse: true }),
       headers: { 'Content-Type': 'application/json' },
@@ -171,7 +171,7 @@ describe('POST /api/categories/merge validation', () => {
   });
 
   it('returns 400 for missing sourceName/targetName', async () => {
-    const res = await POST(makeNextRequest('/api/categories/merge', {
+    const res = await POST(await makeNextRequest('/api/categories/merge', {
       method: 'POST',
       body: JSON.stringify({}),
       headers: { 'Content-Type': 'application/json' },
@@ -182,7 +182,7 @@ describe('POST /api/categories/merge validation', () => {
   });
 
   it('returns 400 when source equals target', async () => {
-    const res = await POST(makeNextRequest('/api/categories/merge', {
+    const res = await POST(await makeNextRequest('/api/categories/merge', {
       method: 'POST',
       body: JSON.stringify({ sourceName: 'PIS', targetName: 'PIS' }),
       headers: { 'Content-Type': 'application/json' },
@@ -193,7 +193,7 @@ describe('POST /api/categories/merge validation', () => {
   });
 
   it('returns 400 for invalid JSON', async () => {
-    const res = await POST(makeNextRequest('/api/categories/merge', {
+    const res = await POST(await makeNextRequest('/api/categories/merge', {
       method: 'POST',
       body: 'not json',
       headers: { 'Content-Type': 'application/json' },
