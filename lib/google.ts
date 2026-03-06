@@ -167,7 +167,7 @@ export async function stopCalendarWatch(
   resourceId: string,
 ): Promise<void> {
   try {
-    await fetch('https://www.googleapis.com/calendar/v3/channels/stop', {
+    const res = await fetch('https://www.googleapis.com/calendar/v3/channels/stop', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -175,7 +175,13 @@ export async function stopCalendarWatch(
       },
       body: JSON.stringify({ id: channelId, resourceId }),
     });
+    // #region agent log (pre-fix)
+    if (process.env.NODE_ENV !== 'production') fetch('http://127.0.0.1:7719/ingest/e3960d2d-b42f-45cd-97c1-02ec42cc4fbe',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4ed024'},body:JSON.stringify({sessionId:'4ed024',runId:'pre-fix',hypothesisId:'D',location:'lib/google.ts:stopCalendarWatch',message:'Attempted to stop watch channel',data:{ok:res.ok,status:res.status,channelIdPrefix:channelId.slice(0,8),resourceIdSuffix:resourceId.slice(-8)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion agent log (pre-fix)
   } catch {
+    // #region agent log (pre-fix)
+    if (process.env.NODE_ENV !== 'production') fetch('http://127.0.0.1:7719/ingest/e3960d2d-b42f-45cd-97c1-02ec42cc4fbe',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4ed024'},body:JSON.stringify({sessionId:'4ed024',runId:'pre-fix',hypothesisId:'D',location:'lib/google.ts:stopCalendarWatch:catch',message:'Stop watch channel threw (best-effort ignored)',data:{channelIdPrefix:channelId.slice(0,8),resourceIdSuffix:resourceId.slice(-8)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion agent log (pre-fix)
     // Best effort — channel may already be expired or invalid
   }
 }

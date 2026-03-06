@@ -311,6 +311,9 @@ export async function ensureCalendarWatch(): Promise<{
   if (base.includes('localhost')) {
     console.warn('[watch] base URL contains localhost — Google cannot reach this.');
   }
+  // #region agent log (pre-fix)
+  if (process.env.NODE_ENV !== 'production') fetch('http://127.0.0.1:7719/ingest/e3960d2d-b42f-45cd-97c1-02ec42cc4fbe',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4ed024'},body:JSON.stringify({sessionId:'4ed024',runId:'pre-fix',hypothesisId:'C',location:'lib/google-calendar-sync.ts:ensureCalendarWatch:entry',message:'ensureCalendarWatch called',data:{calendarIdPrefix:calId.slice(0,8),address},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion agent log (pre-fix)
   try {
     const existingRows = await db
       .select()
@@ -347,6 +350,9 @@ export async function ensureCalendarWatch(): Promise<{
         },
       });
     console.warn('[watch] Created: Google will POST to', address);
+    // #region agent log (pre-fix)
+    if (process.env.NODE_ENV !== 'production') fetch('http://127.0.0.1:7719/ingest/e3960d2d-b42f-45cd-97c1-02ec42cc4fbe',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4ed024'},body:JSON.stringify({sessionId:'4ed024',runId:'pre-fix',hypothesisId:'C',location:'lib/google-calendar-sync.ts:ensureCalendarWatch:created',message:'ensureCalendarWatch created channel',data:{channelIdPrefix:channel.id.slice(0,8),resourceIdSuffix:channel.resourceId.slice(-8),expirationIso:expiration.toISOString()},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion agent log (pre-fix)
     return { ok: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
