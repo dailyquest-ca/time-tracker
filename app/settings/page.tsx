@@ -21,6 +21,19 @@ interface CategorySuggestions {
   suggestedFromTitles: string[];
 }
 
+interface ReclassifyProposal {
+  id: string;
+  pattern: string;
+  matchType: 'acronym' | 'prefix';
+  eventCount: number;
+  totalHours: number;
+  currentCategories: Record<string, number>;
+  suggestedCategoryId: number | null;
+  suggestedCategoryName: string;
+  eventIds: number[];
+  sampleEvents: Array<{ id: number; name: string; date: string; lengthHours: string }>;
+}
+
 export default function SettingsPage() {
   const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
   const [calendars, setCalendars] = useState<CalendarEntry[]>([]);
@@ -35,6 +48,11 @@ export default function SettingsPage() {
     status: string;
     expiration?: string;
   } | null>(null);
+  const [proposals, setProposals] = useState<ReclassifyProposal[]>([]);
+  const [reclassifyWindow, setReclassifyWindow] = useState<{ from: string; to: string } | null>(null);
+  const [expandedProposal, setExpandedProposal] = useState<string | null>(null);
+  const [reclassifyTarget, setReclassifyTarget] = useState<Record<string, number | 'new'>>({});
+  const [applyingProposal, setApplyingProposal] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingCalendar, setSavingCalendar] = useState(false);
   const [savingCategories, setSavingCategories] = useState(false);
@@ -80,6 +98,15 @@ export default function SettingsPage() {
       const watchRes = await fetch('/api/sync/watch-status');
       if (watchRes.ok) {
         setWatchStatus(await watchRes.json());
+      }
+
+      const reclRes = await fetch('/api/categories/reclassify/suggestions');
+      if (reclRes.ok) {
+        const reclData = await reclRes.json();
+        setProposals(reclData.proposals ?? []);
+        setReclassifyWindow(reclData.window ?? null);
+      } else {
+        setProposals([]);
       }
 
       const sugRes = await fetch('/api/categories/suggestions');
@@ -243,6 +270,70 @@ export default function SettingsPage() {
       setError(e instanceof Error ? e.message : 'Merge failed');
     } finally {
       setSavingCategories(false);
+    }
+  };
+
+  const handleApplyReclassify = async (proposal: ReclassifyProposal) => {
+    const targetVal = reclassifyTarget[proposal.id];
+    if (targetVal === undefined) return;
+
+    let targetCategoryId: number;
+
+    if (targetVal === 'new') {
+      setSavingCategories(true);
+      setError(null);
+      try {
+        const res = await fetch('/api/categories', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            categories: [
+              ...categoriesList.map((c) => ({
+                id: c.id,
+                name: c.name,
+                archived: c.archived,
+                displayOrder: c.displayOrder,
+              })),
+              { name: proposal.suggestedCategoryName, archived: false },
+            ],
+          }),
+        });
+        if (!res.ok) throw new Error('Failed to create category');
+        const data = await res.json();
+        const newCats: CategoryRow[] = data.data ?? [];
+        setCategoriesList(newCats);
+        const created = newCats.find((c) => c.name === proposal.suggestedCategoryName);
+        if (!created) throw new Error('Category was not created');
+        targetCategoryId = created.id;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to create category');
+        setSavingCategories(false);
+        return;
+      } finally {
+        setSavingCategories(false);
+      }
+    } else {
+      targetCategoryId = targetVal;
+    }
+
+    setApplyingProposal(proposal.id);
+    setError(null);
+    try {
+      const res = await fetch('/api/categories/reclassify/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventIds: proposal.eventIds, targetCategoryId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? 'Reclassification failed');
+      }
+      setExpandedProposal(null);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Reclassification failed');
+    } finally {
+      setApplyingProposal(null);
     }
   };
 
@@ -576,6 +667,118 @@ export default function SettingsPage() {
             </button>
           </div>
         </section>
+
+        {proposals.length > 0 && (
+          <section className="mb-8">
+            <h2 className="mb-2 text-lg font-medium">Optimize categories</h2>
+            <p className="mb-2 text-sm text-gray-600">
+              These events in broad categories might belong in a more specific one.
+              {reclassifyWindow && (
+                <span className="text-gray-400"> Reviewing {reclassifyWindow.from} to {reclassifyWindow.to}.</span>
+              )}
+            </p>
+            <div className="space-y-3">
+              {proposals.map((p) => {
+                const isExpanded = expandedProposal === p.id;
+                const targetVal = reclassifyTarget[p.id];
+                const activeCategories = categoriesList.filter((c) => !c.archived);
+
+                return (
+                  <div key={p.id} className="rounded border border-gray-200 bg-white shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => setExpandedProposal(isExpanded ? null : p.id)}
+                      className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-gray-50"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-700">
+                          {p.matchType === 'acronym' ? 'Acronym' : 'Prefix'}
+                        </span>
+                        <span className="text-sm font-medium text-gray-900">{p.pattern}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-gray-500">
+                        <span>{p.eventCount} events</span>
+                        <span>{p.totalHours.toFixed(1)} h</span>
+                        <span className="text-gray-300">{isExpanded ? '▲' : '▼'}</span>
+                      </div>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="border-t border-gray-100 px-3 py-3">
+                        <div className="mb-3">
+                          <p className="text-xs font-medium text-gray-600 mb-1">Currently in:</p>
+                          <div className="flex flex-wrap gap-2 text-xs">
+                            {Object.entries(p.currentCategories).map(([cat, count]) => (
+                              <span key={cat} className="rounded bg-gray-100 px-2 py-0.5">
+                                {cat}: {count}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="mb-3">
+                          <p className="text-xs font-medium text-gray-600 mb-1">Sample events:</p>
+                          <ul className="text-xs text-gray-600 space-y-0.5">
+                            {p.sampleEvents.map((e) => (
+                              <li key={e.id} className="flex justify-between">
+                                <span className="truncate max-w-[240px]">{e.name}</span>
+                                <span className="text-gray-400 ml-2 whitespace-nowrap">{e.date} &middot; {e.lengthHours} h</span>
+                              </li>
+                            ))}
+                            {p.eventCount > p.sampleEvents.length && (
+                              <li className="text-gray-400">...and {p.eventCount - p.sampleEvents.length} more</li>
+                            )}
+                          </ul>
+                        </div>
+
+                        <div className="mb-3">
+                          <p className="text-xs font-medium text-gray-600 mb-1">Move {p.eventCount} events to:</p>
+                          <select
+                            value={targetVal === 'new' ? 'new' : targetVal ?? ''}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setReclassifyTarget((prev) => ({
+                                ...prev,
+                                [p.id]: v === 'new' ? 'new' : Number(v),
+                              }));
+                            }}
+                            className="rounded border border-gray-300 px-2 py-1 text-sm w-full"
+                          >
+                            <option value="">Choose target...</option>
+                            {p.suggestedCategoryId == null && (
+                              <option value="new">Create new: {p.suggestedCategoryName}</option>
+                            )}
+                            {activeCategories.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}{c.id === p.suggestedCategoryId ? ' (suggested)' : ''}
+                              </option>
+                            ))}
+                            {p.suggestedCategoryId == null && (
+                              <option disabled>───</option>
+                            )}
+                          </select>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleApplyReclassify(p)}
+                          disabled={
+                            applyingProposal === p.id ||
+                            targetVal === undefined ||
+                            targetVal === ('' as unknown as number)
+                          }
+                          className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {applyingProposal === p.id ? 'Applying...' : `Apply to ${p.eventCount} events`}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
       </div>
     </main>
   );

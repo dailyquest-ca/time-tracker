@@ -60,6 +60,14 @@ vi.mock('@/lib/google-calendar-sync', () => ({
   getWatchStatus: vi.fn().mockResolvedValue({ status: 'active', expiration: '2026-03-12T00:00:00.000Z' }),
 }));
 
+// Mock category-reclassification
+vi.mock('@/lib/category-reclassification', () => ({
+  getRecategorizationSuggestions: vi.fn().mockResolvedValue([]),
+  previewReclassification: vi.fn().mockResolvedValue([]),
+  applyReclassification: vi.fn().mockResolvedValue({ eventsUpdated: 0, affectedDates: [] }),
+  getAllowedWindow: vi.fn().mockReturnValue({ from: '2026-02-01', to: '2026-03-31' }),
+}));
+
 // NextRequest needs a full URL to populate nextUrl.searchParams
 async function makeNextRequest(url: string, init?: RequestInit) {
   const { NextRequest: NR } = await import('next/server');
@@ -310,5 +318,87 @@ describe('POST /api/webhooks/google-calendar', () => {
     });
     const res = await POST(req);
     expect(res.status).toBe(403);
+  });
+});
+
+describe('GET /api/categories/reclassify/suggestions', () => {
+  let GET: () => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const mod = await import('@/app/api/categories/reclassify/suggestions/route');
+    GET = mod.GET as unknown as () => Promise<Response>;
+  });
+
+  it('returns 200 with proposals array', async () => {
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toHaveProperty('proposals');
+    expect(Array.isArray(body.proposals)).toBe(true);
+    expect(body).toHaveProperty('window');
+  });
+});
+
+describe('POST /api/categories/reclassify/apply', () => {
+  let POST: (req: Request) => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const mod = await import('@/app/api/categories/reclassify/apply/route');
+    POST = mod.POST as unknown as (req: Request) => Promise<Response>;
+  });
+
+  it('returns 400 when eventIds is missing', async () => {
+    const res = await POST(await makeNextRequest('/api/categories/reclassify/apply', {
+      method: 'POST',
+      body: JSON.stringify({ targetCategoryId: 1 }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain('eventIds');
+  });
+
+  it('returns 400 when targetCategoryId is missing', async () => {
+    const res = await POST(await makeNextRequest('/api/categories/reclassify/apply', {
+      method: 'POST',
+      body: JSON.stringify({ eventIds: [1, 2, 3] }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain('targetCategoryId');
+  });
+
+  it('returns 400 for invalid JSON', async () => {
+    const res = await POST(await makeNextRequest('/api/categories/reclassify/apply', {
+      method: 'POST',
+      body: 'not json',
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when eventIds is empty array', async () => {
+    const res = await POST(await makeNextRequest('/api/categories/reclassify/apply', {
+      method: 'POST',
+      body: JSON.stringify({ eventIds: [], targetCategoryId: 5 }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain('eventIds');
+  });
+
+  it('returns 200 with valid payload', async () => {
+    const res = await POST(await makeNextRequest('/api/categories/reclassify/apply', {
+      method: 'POST',
+      body: JSON.stringify({ eventIds: [1, 2, 3], targetCategoryId: 5 }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toHaveProperty('eventsUpdated');
   });
 });
