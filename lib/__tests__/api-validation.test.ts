@@ -57,6 +57,7 @@ vi.mock('@/lib/google-calendar-sync', () => ({
   getValidGoogleToken: vi.fn().mockResolvedValue(null),
   ensureCalendarWatch: vi.fn().mockResolvedValue({ ok: true }),
   getLastSyncedAt: vi.fn().mockResolvedValue('2026-03-05T12:00:00.000Z'),
+  getWatchStatus: vi.fn().mockResolvedValue({ status: 'active', expiration: '2026-03-12T00:00:00.000Z' }),
 }));
 
 // NextRequest needs a full URL to populate nextUrl.searchParams
@@ -207,6 +208,7 @@ describe('POST /api/sync', () => {
   let POST: () => Promise<Response>;
 
   beforeEach(async () => {
+    vi.resetModules();
     const mod = await import('@/app/api/sync/route');
     POST = mod.POST as unknown as () => Promise<Response>;
   });
@@ -216,6 +218,30 @@ describe('POST /api/sync', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
+  });
+
+  it('includes watchError in response when sync ok but watch failed', async () => {
+    const syncMod = await import('@/lib/google-calendar-sync');
+    vi.mocked(syncMod.runGoogleCalendarSync).mockResolvedValueOnce({
+      ok: true,
+      segmentsProcessed: 5,
+      watchError: 'Rate limit exceeded',
+    });
+    vi.resetModules();
+    vi.doMock('@/lib/google-calendar-sync', () => ({
+      ...syncMod,
+      runGoogleCalendarSync: vi.fn().mockResolvedValue({
+        ok: true,
+        segmentsProcessed: 5,
+        watchError: 'Rate limit exceeded',
+      }),
+    }));
+    const mod = await import('@/app/api/sync/route');
+    const res = await (mod.POST as unknown as () => Promise<Response>)();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.watchError).toBe('Rate limit exceeded');
   });
 });
 
@@ -233,6 +259,25 @@ describe('GET /api/sync/status', () => {
     const body = await res.json();
     expect(body).toHaveProperty('lastSyncedAt');
     expect(body.lastSyncedAt).toBe('2026-03-05T12:00:00.000Z');
+  });
+});
+
+describe('GET /api/sync/watch-status', () => {
+  let GET: () => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const mod = await import('@/app/api/sync/watch-status/route');
+    GET = mod.GET as unknown as () => Promise<Response>;
+  });
+
+  it('returns 200 with watch status', async () => {
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toHaveProperty('status');
+    expect(body.status).toBe('active');
+    expect(body).toHaveProperty('expiration');
   });
 });
 

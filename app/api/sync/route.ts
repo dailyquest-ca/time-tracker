@@ -15,6 +15,7 @@ async function handleSync() {
   return NextResponse.json({
     ok: true,
     segmentsProcessed: result.segmentsProcessed,
+    ...(result.watchError ? { watchError: result.watchError } : {}),
   });
 }
 

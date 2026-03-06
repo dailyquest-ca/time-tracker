@@ -58,6 +58,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [watchWarning, setWatchWarning] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
 
   // Day detail modal
@@ -134,10 +135,14 @@ export default function HomePage() {
   const handleSyncNow = async () => {
     setSyncing(true);
     setSyncError(null);
+    setWatchWarning(null);
     try {
       const res = await fetch('/api/sync', { method: 'POST' });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Sync failed');
+      if (json.watchError) {
+        setWatchWarning(`Live updates unavailable: ${json.watchError}`);
+      }
       setLastSyncedAt(new Date().toISOString());
       await fetchHours(range.from, range.to);
     } catch (e) {
@@ -245,6 +250,9 @@ export default function HomePage() {
         </header>
         {syncError && (
           <p className="mb-2 rounded border border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">{syncError}</p>
+        )}
+        {watchWarning && (
+          <p className="mb-2 rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">{watchWarning}</p>
         )}
 
         {/* View switcher */}

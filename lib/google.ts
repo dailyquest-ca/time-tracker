@@ -157,6 +157,29 @@ export async function listCalendarEvents(
   return allEvents;
 }
 
+/**
+ * Stop (cancel) an existing push notification channel.
+ * Best-effort: does not throw on failure since the channel may already be expired.
+ */
+export async function stopCalendarWatch(
+  accessToken: string,
+  channelId: string,
+  resourceId: string,
+): Promise<void> {
+  try {
+    await fetch('https://www.googleapis.com/calendar/v3/channels/stop', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ id: channelId, resourceId }),
+    });
+  } catch {
+    // Best effort — channel may already be expired or invalid
+  }
+}
+
 export interface WatchChannelResponse {
   id: string;
   resourceId: string;

@@ -12,6 +12,7 @@ import {
   GoogleCalendarEvent,
   listCalendarEvents,
   refreshGoogleToken,
+  stopCalendarWatch,
 } from './google';
 import { recomputeDailyTotalsForDates } from './overtime';
 import { resolveCategoryId, type CategoryRow } from './categorize';
@@ -108,6 +109,7 @@ export async function runGoogleCalendarSync(): Promise<{
   ok: boolean;
   error?: string;
   segmentsProcessed?: number;
+  watchError?: string;
 }> {
   const accessToken = await getValidGoogleToken();
   if (!accessToken) {
@@ -254,11 +256,27 @@ export async function runGoogleCalendarSync(): Promise<{
 
     await stampLastSyncedAt();
 
-    await ensureCalendarWatch().catch((e) =>
-      console.warn('[google-sync] Watch ensure failed:', e),
-    );
+    let watchError: string | undefined;
+    const watchRows = await db
+      .select()
+      .from(calendarWatch)
+      .where(eq(calendarWatch.userId, USER_ID))
+      .limit(1);
+    const watchValid =
+      watchRows.length > 0 &&
+      new Date(watchRows[0].expiration).getTime() > Date.now();
+    if (!watchValid) {
+      const watchResult = await ensureCalendarWatch().catch((e) => ({
+        ok: false as const,
+        error: e instanceof Error ? e.message : String(e),
+      }));
+      if (!watchResult.ok) {
+        watchError = watchResult.error;
+        console.warn('[google-sync] Watch ensure failed:', watchError);
+      }
+    }
 
-    return { ok: true, segmentsProcessed: relevant.length };
+    return { ok: true, segmentsProcessed: relevant.length, watchError };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[google-sync] Error: ${message}`);
@@ -294,6 +312,16 @@ export async function ensureCalendarWatch(): Promise<{
     console.warn('[watch] base URL contains localhost — Google cannot reach this.');
   }
   try {
+    const existingRows = await db
+      .select()
+      .from(calendarWatch)
+      .where(eq(calendarWatch.userId, USER_ID))
+      .limit(1);
+    if (existingRows.length > 0) {
+      const old = existingRows[0];
+      await stopCalendarWatch(accessToken, old.channelId, old.resourceId);
+    }
+
     const channel = await createCalendarWatch(accessToken, calId, address, {
       ttlSeconds: 7 * 24 * 60 * 60 - 60,
     });
@@ -322,7 +350,12 @@ export async function ensureCalendarWatch(): Promise<{
     return { ok: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[google-sync] Watch create failed: ${message}`);
+    console.error(
+      `[google-sync] Watch create failed: ${message}`,
+      '\n  address:', address,
+      '\n  calendarId:', calId,
+      err instanceof Error && 'cause' in err ? `\n  cause: ${err.cause}` : '',
+    );
     return { ok: false, error: message };
   }
 }
@@ -348,6 +381,29 @@ export async function getLastSyncedAt(): Promise<string | null> {
     .limit(1);
   const val = rows[0]?.value;
   return typeof val === 'string' ? val : null;
+}
+
+export async function getWatchStatus(): Promise<{
+  status: 'active' | 'expiring_soon' | 'expired' | 'missing';
+  expiration?: string;
+}> {
+  const rows = await db
+    .select()
+    .from(calendarWatch)
+    .where(eq(calendarWatch.userId, USER_ID))
+    .limit(1);
+  if (rows.length === 0) return { status: 'missing' };
+  const row = rows[0];
+  const exp = new Date(row.expiration);
+  const now = Date.now();
+  if (exp.getTime() <= now) {
+    return { status: 'expired', expiration: exp.toISOString() };
+  }
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  if (exp.getTime() - oneDayMs <= now) {
+    return { status: 'expiring_soon', expiration: exp.toISOString() };
+  }
+  return { status: 'active', expiration: exp.toISOString() };
 }
 
 export async function renewCalendarWatchIfNeeded(): Promise<boolean> {

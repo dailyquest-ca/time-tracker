@@ -31,6 +31,10 @@ export default function SettingsPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingName, setEditingName] = useState('');
   const [mergeSource, setMergeSource] = useState<CategoryRow | null>(null);
+  const [watchStatus, setWatchStatus] = useState<{
+    status: string;
+    expiration?: string;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingCalendar, setSavingCalendar] = useState(false);
   const [savingCategories, setSavingCategories] = useState(false);
@@ -71,6 +75,11 @@ export default function SettingsPage() {
         setCategoriesList(catData.data ?? []);
       } else {
         setCategoriesList([]);
+      }
+
+      const watchRes = await fetch('/api/sync/watch-status');
+      if (watchRes.ok) {
+        setWatchStatus(await watchRes.json());
       }
 
       const sugRes = await fetch('/api/categories/suggestions');
@@ -304,7 +313,30 @@ export default function SettingsPage() {
               : 'Connect your Google account, then choose which calendar to use for work hours.'}
           </p>
           {googleConnected ? (
-            <span className="text-sm text-green-600">Connected</span>
+            <div className="space-y-1">
+              <span className="text-sm text-green-600">Connected</span>
+              {watchStatus && (
+                <div className="text-xs">
+                  <span className="text-gray-500">Push notifications: </span>
+                  {watchStatus.status === 'active' && (
+                    <span className="text-green-600">
+                      Active{watchStatus.expiration ? ` (expires ${new Date(watchStatus.expiration).toLocaleDateString()})` : ''}
+                    </span>
+                  )}
+                  {watchStatus.status === 'expiring_soon' && (
+                    <span className="text-amber-600">
+                      Expiring soon{watchStatus.expiration ? ` (${new Date(watchStatus.expiration).toLocaleDateString()})` : ''}
+                    </span>
+                  )}
+                  {watchStatus.status === 'expired' && (
+                    <span className="text-red-600">Expired — run a manual sync to re-establish</span>
+                  )}
+                  {watchStatus.status === 'missing' && (
+                    <span className="text-red-600">Not set up — run a manual sync to establish</span>
+                  )}
+                </div>
+              )}
+            </div>
           ) : (
             <a
               href="/api/auth/google"

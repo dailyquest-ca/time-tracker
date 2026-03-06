@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   roundToNearest15,
   isAllDayEvent,
@@ -7,6 +7,7 @@ import {
   stableExternalId,
 } from '../google-calendar-sync';
 import type { GoogleCalendarEvent } from '../google';
+import { stopCalendarWatch } from '../google';
 
 function makeEvent(overrides: Partial<GoogleCalendarEvent> = {}): GoogleCalendarEvent {
   return {
@@ -123,5 +124,40 @@ describe('stableExternalId', () => {
       start: { date: '2026-03-05' },
     });
     expect(stableExternalId(evt)).toBe('instance-1');
+  });
+});
+
+describe('stopCalendarWatch', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('calls Google channels/stop API with correct payload', async () => {
+    const mockFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 204 }),
+    );
+
+    await stopCalendarWatch('test-token', 'channel-123', 'resource-456');
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://www.googleapis.com/calendar/v3/channels/stop');
+    expect(opts?.method).toBe('POST');
+    expect(opts?.headers).toMatchObject({
+      Authorization: 'Bearer test-token',
+      'Content-Type': 'application/json',
+    });
+    const body = JSON.parse(opts?.body as string);
+    expect(body).toEqual({ id: 'channel-123', resourceId: 'resource-456' });
+  });
+
+  it('does not throw on non-2xx response (best effort)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('Not Found', { status: 404 }),
+    );
+
+    await expect(
+      stopCalendarWatch('test-token', 'channel-123', 'resource-456'),
+    ).resolves.not.toThrow();
   });
 });
