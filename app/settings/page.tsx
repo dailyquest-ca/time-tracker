@@ -347,11 +347,15 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ calendarId }),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         throw new Error(data.error ?? 'Failed to save');
       }
       setWorkCalendarId(calendarId);
+      if (data.syncError) {
+        setError(`Calendar saved, but initial sync had an issue: ${data.syncError}`);
+      }
+      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save calendar');
     } finally {
@@ -401,7 +405,7 @@ export default function SettingsPage() {
           <h2 className="mb-2 text-lg font-medium">Google Calendar</h2>
           <p className="mb-2 text-sm text-gray-600">
             {googleConnected
-              ? 'Connected. Select your Work calendar below; time tracking updates when that calendar changes.'
+              ? 'Connected. Select your work calendar below to start tracking. Hours update automatically when the calendar changes.'
               : 'Connect your Google account, then choose which calendar to use for work hours.'}
           </p>
           {googleConnected ? (
@@ -446,10 +450,10 @@ export default function SettingsPage() {
                     </span>
                   )}
                   {watchStatus.status === 'expired' && (
-                    <span className="text-red-600">Expired — run a manual sync to re-establish</span>
+                    <span className="text-red-600">Expired — select your calendar below to re-establish</span>
                   )}
                   {watchStatus.status === 'missing' && (
-                    <span className="text-red-600">Not set up — run a manual sync to establish</span>
+                    <span className="text-red-600">Not set up — select a calendar below to establish</span>
                   )}
                 </div>
               )}
@@ -468,7 +472,7 @@ export default function SettingsPage() {
           <section className="mb-8">
             <h2 className="mb-2 text-lg font-medium">Work calendar</h2>
             <p className="mb-2 text-sm text-gray-600">
-              Events from the selected calendar are synced as work segments. Categories are derived from event titles (e.g. a leading acronym like PIS or ELAN, or broad categories like Learning, 1:1s).
+              Select a calendar to track. Events are imported immediately and kept up to date automatically via push notifications.
             </p>
             <div className="flex flex-wrap items-center gap-2">
               {calendars.map((cal) => (
@@ -483,8 +487,8 @@ export default function SettingsPage() {
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
                 >
-                  {cal.summary || cal.id}
-                  {cal.primary && ' (primary)'}
+                  {savingCalendar ? 'Setting up…' : (cal.summary || cal.id)}
+                  {!savingCalendar && cal.primary && ' (primary)'}
                 </button>
               ))}
             </div>

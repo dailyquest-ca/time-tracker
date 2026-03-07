@@ -56,9 +56,6 @@ export default function HomePage() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [data, setData] = useState<DailyRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [watchWarning, setWatchWarning] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
 
   // Day detail modal
@@ -131,26 +128,6 @@ export default function HomePage() {
       .then((json) => setPpData(json.data ?? []))
       .catch(() => setPpData([]));
   }, [ppMonth, ppYear]);
-
-  const handleSyncNow = async () => {
-    setSyncing(true);
-    setSyncError(null);
-    setWatchWarning(null);
-    try {
-      const res = await fetch('/api/sync', { method: 'POST' });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? 'Sync failed');
-      if (json.watchError) {
-        setWatchWarning(`Live updates unavailable: ${json.watchError}`);
-      }
-      setLastSyncedAt(new Date().toISOString());
-      await fetchHours(range.from, range.to);
-    } catch (e) {
-      setSyncError(e instanceof Error ? e.message : 'Sync failed');
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const openDay = async (date: string) => {
     setModalDate(date);
@@ -233,27 +210,10 @@ export default function HomePage() {
         {/* Header */}
         <header className="mb-4 flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-900">Time Tracker</h1>
-          <div className="flex items-center gap-3 text-sm">
-            <button
-              type="button"
-              onClick={handleSyncNow}
-              disabled={syncing}
-              className="text-gray-400 hover:text-gray-600 disabled:opacity-50 text-xs"
-              title="Force a manual sync with Google Calendar"
-            >
-              {syncing ? 'Syncing…' : 'Sync'}
-            </button>
-            <Link href="/settings" className="text-gray-500 hover:text-gray-800 underline text-xs">
-              Settings
-            </Link>
-          </div>
+          <Link href="/settings" className="text-gray-500 hover:text-gray-800 underline text-xs">
+            Settings
+          </Link>
         </header>
-        {syncError && (
-          <p className="mb-2 rounded border border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">{syncError}</p>
-        )}
-        {watchWarning && (
-          <p className="mb-2 rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">{watchWarning}</p>
-        )}
 
         {/* View switcher */}
         <div className="mb-3 flex items-center gap-2 text-xs">

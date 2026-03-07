@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { appConfig } from '@/lib/schema';
 import { eq } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureCalendarWatch } from '@/lib/google-calendar-sync';
+import { runGoogleCalendarSync } from '@/lib/google-calendar-sync';
 
 const KEY = 'work_calendar_id';
 
@@ -43,8 +43,19 @@ export async function PATCH(request: NextRequest) {
       target: appConfig.key,
       set: { value: calendarId, updatedAt: new Date() },
     });
-  await ensureCalendarWatch().catch((e) =>
-    console.warn('[work-calendar] Watch ensure after save:', e),
-  );
-  return NextResponse.json({ ok: true, calendarId });
+
+  const syncResult = await runGoogleCalendarSync().catch((e) => ({
+    ok: false as const,
+    error: e instanceof Error ? e.message : String(e),
+    segmentsProcessed: undefined as number | undefined,
+    watchError: undefined as string | undefined,
+  }));
+
+  return NextResponse.json({
+    ok: true,
+    calendarId,
+    segmentsProcessed: syncResult.segmentsProcessed,
+    ...(syncResult.watchError ? { watchError: syncResult.watchError } : {}),
+    ...(syncResult.error ? { syncError: syncResult.error } : {}),
+  });
 }

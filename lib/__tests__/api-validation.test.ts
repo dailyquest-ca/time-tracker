@@ -222,44 +222,68 @@ describe('POST /api/categories/merge validation', () => {
   });
 });
 
-describe('POST /api/sync', () => {
-  let POST: () => Promise<Response>;
+describe('PATCH /api/config/work-calendar', () => {
+  let PATCH: (req: Request) => Promise<Response>;
 
   beforeEach(async () => {
     vi.resetModules();
-    const mod = await import('@/app/api/sync/route');
-    POST = mod.POST as unknown as () => Promise<Response>;
+    const mod = await import('@/app/api/config/work-calendar/route');
+    PATCH = mod.PATCH as unknown as (req: Request) => Promise<Response>;
   });
 
-  it('returns 200 when sync succeeds', async () => {
-    const res = await POST();
+  it('returns 400 for missing calendarId', async () => {
+    const req = await makeNextRequest('/api/config/work-calendar', {
+      method: 'PATCH',
+      body: JSON.stringify({}),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await PATCH(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain('calendarId');
+  });
+
+  it('returns 400 for invalid JSON', async () => {
+    const req = await makeNextRequest('/api/config/work-calendar', {
+      method: 'PATCH',
+      body: 'not json',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await PATCH(req);
+    expect(res.status).toBe(400);
+  });
+
+  it('calls runGoogleCalendarSync after saving calendar (auto-setup)', async () => {
+    const syncMod = await import('@/lib/google-calendar-sync');
+    vi.mocked(syncMod.runGoogleCalendarSync).mockClear();
+    const req = await makeNextRequest('/api/config/work-calendar', {
+      method: 'PATCH',
+      body: JSON.stringify({ calendarId: 'my-cal@gmail.com' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await PATCH(req);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
+    expect(body.calendarId).toBe('my-cal@gmail.com');
+    expect(syncMod.runGoogleCalendarSync).toHaveBeenCalledTimes(1);
   });
 
-  it('includes watchError in response when sync ok but watch failed', async () => {
+  it('returns sync results including segmentsProcessed', async () => {
     const syncMod = await import('@/lib/google-calendar-sync');
     vi.mocked(syncMod.runGoogleCalendarSync).mockResolvedValueOnce({
       ok: true,
-      segmentsProcessed: 5,
-      watchError: 'Rate limit exceeded',
+      segmentsProcessed: 12,
     });
-    vi.resetModules();
-    vi.doMock('@/lib/google-calendar-sync', () => ({
-      ...syncMod,
-      runGoogleCalendarSync: vi.fn().mockResolvedValue({
-        ok: true,
-        segmentsProcessed: 5,
-        watchError: 'Rate limit exceeded',
-      }),
-    }));
-    const mod = await import('@/app/api/sync/route');
-    const res = await (mod.POST as unknown as () => Promise<Response>)();
+    const req = await makeNextRequest('/api/config/work-calendar', {
+      method: 'PATCH',
+      body: JSON.stringify({ calendarId: 'work@group.calendar.google.com' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await PATCH(req);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(body.watchError).toBe('Rate limit exceeded');
+    expect(body.segmentsProcessed).toBe(12);
   });
 });
 
@@ -267,6 +291,7 @@ describe('GET /api/sync/status', () => {
   let GET: () => Promise<Response>;
 
   beforeEach(async () => {
+    vi.resetModules();
     const mod = await import('@/app/api/sync/status/route');
     GET = mod.GET as unknown as () => Promise<Response>;
   });
