@@ -24,6 +24,18 @@ export interface GoogleCalendarEvent {
   status?: string;
 }
 
+export class SyncTokenInvalidError extends Error {
+  constructor() {
+    super('Sync token expired or invalid (410 Gone)');
+    this.name = 'SyncTokenInvalidError';
+  }
+}
+
+export interface EventListResult {
+  events: GoogleCalendarEvent[];
+  nextSyncToken?: string;
+}
+
 function getEnv(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env: ${name}`);
@@ -122,8 +134,22 @@ export async function listCalendarEvents(
   calendarId: string,
   options: { timeMin: string; timeMax: string },
 ): Promise<GoogleCalendarEvent[]> {
+  const { events } = await listCalendarEventsWithSync(accessToken, calendarId, options);
+  return events;
+}
+
+/**
+ * Baseline fetch: events in a time window, returning the nextSyncToken for
+ * subsequent incremental syncs. singleEvents=true so recurring instances are expanded.
+ */
+export async function listCalendarEventsWithSync(
+  accessToken: string,
+  calendarId: string,
+  options: { timeMin: string; timeMax: string },
+): Promise<EventListResult> {
   const allEvents: GoogleCalendarEvent[] = [];
   let pageToken: string | undefined;
+  let nextSyncToken: string | undefined;
   const encodedId = encodeURIComponent(calendarId);
 
   do {
@@ -131,10 +157,9 @@ export async function listCalendarEvents(
       timeMin: options.timeMin,
       timeMax: options.timeMax,
       singleEvents: 'true',
-      orderBy: 'startTime',
       maxResults: '250',
       fields:
-        'items(id,recurringEventId,summary,description,start,end,status),nextPageToken',
+        'items(id,recurringEventId,summary,description,start,end,status),nextPageToken,nextSyncToken',
     });
     if (pageToken) params.set('pageToken', pageToken);
 
@@ -149,12 +174,63 @@ export async function listCalendarEvents(
     const data = (await res.json()) as {
       items?: GoogleCalendarEvent[];
       nextPageToken?: string;
+      nextSyncToken?: string;
     };
     if (data.items) allEvents.push(...data.items);
     pageToken = data.nextPageToken;
+    if (data.nextSyncToken) nextSyncToken = data.nextSyncToken;
   } while (pageToken);
 
-  return allEvents;
+  return { events: allEvents, nextSyncToken };
+}
+
+/**
+ * Incremental fetch: only events changed since the given syncToken.
+ * Deleted events arrive with status='cancelled'. Cannot use timeMin/timeMax/orderBy.
+ * Throws SyncTokenInvalidError on 410 (token expired or server-invalidated).
+ */
+export async function listCalendarEventsIncremental(
+  accessToken: string,
+  calendarId: string,
+  syncToken: string,
+): Promise<EventListResult> {
+  const allEvents: GoogleCalendarEvent[] = [];
+  let pageToken: string | undefined;
+  let nextSyncToken: string | undefined;
+  const encodedId = encodeURIComponent(calendarId);
+
+  do {
+    const params = new URLSearchParams({
+      syncToken,
+      singleEvents: 'true',
+      maxResults: '250',
+      fields:
+        'items(id,recurringEventId,summary,description,start,end,status),nextPageToken,nextSyncToken',
+    });
+    if (pageToken) params.set('pageToken', pageToken);
+
+    const url = `${GOOGLE_CALENDAR_BASE}/calendars/${encodedId}/events?${params.toString()}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (res.status === 410) {
+      throw new SyncTokenInvalidError();
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Google Calendar events.list (incremental): ${res.status} ${text}`);
+    }
+    const data = (await res.json()) as {
+      items?: GoogleCalendarEvent[];
+      nextPageToken?: string;
+      nextSyncToken?: string;
+    };
+    if (data.items) allEvents.push(...data.items);
+    pageToken = data.nextPageToken;
+    if (data.nextSyncToken) nextSyncToken = data.nextSyncToken;
+  } while (pageToken);
+
+  return { events: allEvents, nextSyncToken };
 }
 
 /**
@@ -167,7 +243,7 @@ export async function stopCalendarWatch(
   resourceId: string,
 ): Promise<void> {
   try {
-    const res = await fetch('https://www.googleapis.com/calendar/v3/channels/stop', {
+    await fetch('https://www.googleapis.com/calendar/v3/channels/stop', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -175,13 +251,7 @@ export async function stopCalendarWatch(
       },
       body: JSON.stringify({ id: channelId, resourceId }),
     });
-    // #region agent log (pre-fix)
-    if (process.env.NODE_ENV !== 'production') fetch('http://127.0.0.1:7719/ingest/e3960d2d-b42f-45cd-97c1-02ec42cc4fbe',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4ed024'},body:JSON.stringify({sessionId:'4ed024',runId:'pre-fix',hypothesisId:'D',location:'lib/google.ts:stopCalendarWatch',message:'Attempted to stop watch channel',data:{ok:res.ok,status:res.status,channelIdPrefix:channelId.slice(0,8),resourceIdSuffix:resourceId.slice(-8)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion agent log (pre-fix)
   } catch {
-    // #region agent log (pre-fix)
-    if (process.env.NODE_ENV !== 'production') fetch('http://127.0.0.1:7719/ingest/e3960d2d-b42f-45cd-97c1-02ec42cc4fbe',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4ed024'},body:JSON.stringify({sessionId:'4ed024',runId:'pre-fix',hypothesisId:'D',location:'lib/google.ts:stopCalendarWatch:catch',message:'Stop watch channel threw (best-effort ignored)',data:{channelIdPrefix:channelId.slice(0,8),resourceIdSuffix:resourceId.slice(-8)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion agent log (pre-fix)
     // Best effort — channel may already be expired or invalid
   }
 }

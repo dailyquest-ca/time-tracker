@@ -3,7 +3,7 @@
  * These test the validation logic without a real database.
  * DB calls are mocked to isolate the validation layer.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock the DB module before any route imports
 vi.mock('@/lib/db', () => ({
@@ -54,11 +54,15 @@ vi.mock('@/lib/ai-note', () => ({
 // Mock google-calendar-sync
 vi.mock('@/lib/google-calendar-sync', () => ({
   runGoogleCalendarSync: vi.fn().mockResolvedValue({ ok: true, segmentsProcessed: 0 }),
+  runFullReconciliation: vi.fn().mockResolvedValue({ ok: true, segmentsProcessed: 0 }),
   getValidGoogleToken: vi.fn().mockResolvedValue(null),
   getWorkCalendarId: vi.fn().mockResolvedValue(null),
   ensureCalendarWatch: vi.fn().mockResolvedValue({ ok: true }),
   getLastSyncedAt: vi.fn().mockResolvedValue('2026-03-05T12:00:00.000Z'),
   getWatchStatus: vi.fn().mockResolvedValue({ status: 'active', expiration: '2026-03-12T00:00:00.000Z' }),
+  shouldThrottleWebhookSync: vi.fn().mockResolvedValue(false),
+  stampWebhookSyncStarted: vi.fn().mockResolvedValue(undefined),
+  renewCalendarWatchIfNeeded: vi.fn().mockResolvedValue(false),
 }));
 
 // Mock category-reclassification
@@ -418,6 +422,64 @@ describe('POST /api/webhooks/google-calendar', () => {
     expect(res.status).toBe(200);
     expect(body).toMatchObject({ ok: true, ignored: true });
     expect(googleMod.stopCalendarWatch).toHaveBeenCalledWith('fake-access-token', 'chan-123', 'res-456');
+  });
+
+  it('returns 200 with throttled:true when debounce fires', async () => {
+    const syncMod = await import('@/lib/google-calendar-sync');
+    vi.mocked(syncMod.runGoogleCalendarSync).mockClear();
+    vi.mocked(syncMod.shouldThrottleWebhookSync).mockResolvedValueOnce(true);
+
+    const dbMod = await import('@/lib/db');
+    vi.mocked(dbMod.db.select).mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([{ channelId: 'known-chan', resourceId: 'known-res' }]),
+        }),
+      }),
+    } as never);
+
+    const req = await makeNextRequest('/api/webhooks/google-calendar', {
+      method: 'POST',
+      headers: {
+        'x-goog-channel-id': 'known-chan',
+        'x-goog-resource-id': 'known-res',
+        'x-goog-resource-state': 'exists',
+      },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.throttled).toBe(true);
+    expect(syncMod.runGoogleCalendarSync).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/cron/sync', () => {
+  let GET: (req: Request) => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    process.env.CRON_SECRET = 'test-secret';
+    const mod = await import('@/app/api/cron/sync/route');
+    GET = mod.GET as unknown as (req: Request) => Promise<Response>;
+  });
+
+  afterEach(() => {
+    delete process.env.CRON_SECRET;
+  });
+
+  it('calls runFullReconciliation instead of runGoogleCalendarSync', async () => {
+    const syncMod = await import('@/lib/google-calendar-sync');
+    vi.mocked(syncMod.runFullReconciliation).mockClear();
+    vi.mocked(syncMod.runGoogleCalendarSync).mockClear();
+
+    const req = await makeNextRequest('/api/cron/sync', {
+      headers: { authorization: 'Bearer test-secret' },
+    });
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+    expect(syncMod.runFullReconciliation).toHaveBeenCalledTimes(1);
+    expect(syncMod.runGoogleCalendarSync).not.toHaveBeenCalled();
   });
 });
 

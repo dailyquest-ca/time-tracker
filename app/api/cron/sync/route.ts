@@ -1,6 +1,6 @@
 import {
   renewCalendarWatchIfNeeded,
-  runGoogleCalendarSync,
+  runFullReconciliation,
 } from '@/lib/google-calendar-sync';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -20,13 +20,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  console.log('[cron/sync] Starting...');
+  console.log('[cron/sync] Starting reconciliation...');
   const start = Date.now();
 
   const renewed = await renewCalendarWatchIfNeeded();
   if (renewed) console.log('[cron/sync] Calendar watch renewed.');
 
-  const result = await runGoogleCalendarSync();
+  const result = await runFullReconciliation();
   const elapsed = Date.now() - start;
 
   console.log(
