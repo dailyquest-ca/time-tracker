@@ -56,6 +56,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [savingCalendar, setSavingCalendar] = useState(false);
   const [savingCategories, setSavingCategories] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [urlError, setUrlError] = useState<string | null>(null);
 
@@ -404,8 +405,33 @@ export default function SettingsPage() {
               : 'Connect your Google account, then choose which calendar to use for work hours.'}
           </p>
           {googleConnected ? (
-            <div className="space-y-1">
-              <span className="text-sm text-green-600">Connected</span>
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-green-600">Connected</span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setDisconnecting(true);
+                    setError(null);
+                    try {
+                      const res = await fetch('/api/auth/google/disconnect', { method: 'POST' });
+                      if (!res.ok) {
+                        const data = await res.json().catch(() => ({}));
+                        throw new Error(data.error ?? 'Disconnect failed');
+                      }
+                      await load();
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : 'Disconnect failed');
+                    } finally {
+                      setDisconnecting(false);
+                    }
+                  }}
+                  disabled={disconnecting}
+                  className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
+                >
+                  {disconnecting ? 'Disconnecting…' : 'Disconnect'}
+                </button>
+              </div>
               {watchStatus && (
                 <div className="text-xs">
                   <span className="text-gray-500">Push notifications: </span>

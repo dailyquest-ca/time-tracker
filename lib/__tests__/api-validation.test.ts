@@ -55,6 +55,7 @@ vi.mock('@/lib/ai-note', () => ({
 vi.mock('@/lib/google-calendar-sync', () => ({
   runGoogleCalendarSync: vi.fn().mockResolvedValue({ ok: true, segmentsProcessed: 0 }),
   getValidGoogleToken: vi.fn().mockResolvedValue(null),
+  getWorkCalendarId: vi.fn().mockResolvedValue(null),
   ensureCalendarWatch: vi.fn().mockResolvedValue({ ok: true }),
   getLastSyncedAt: vi.fn().mockResolvedValue('2026-03-05T12:00:00.000Z'),
   getWatchStatus: vi.fn().mockResolvedValue({ status: 'active', expiration: '2026-03-12T00:00:00.000Z' }),
@@ -67,6 +68,15 @@ vi.mock('@/lib/category-reclassification', () => ({
   applyReclassification: vi.fn().mockResolvedValue({ eventsUpdated: 0, affectedDates: [] }),
   getAllowedWindow: vi.fn().mockReturnValue({ from: '2026-02-01', to: '2026-03-31' }),
 }));
+
+// Mock lib/google so we can assert stopCalendarWatch is called (webhook unknown-channel flow)
+vi.mock('@/lib/google', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/google')>('@/lib/google');
+  return {
+    ...actual,
+    stopCalendarWatch: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 // NextRequest needs a full URL to populate nextUrl.searchParams
 async function makeNextRequest(url: string, init?: RequestInit) {
@@ -289,6 +299,45 @@ describe('GET /api/sync/watch-status', () => {
   });
 });
 
+describe('POST /api/auth/google/disconnect', () => {
+  let POST: () => Promise<Response>;
+  let db: { delete: ReturnType<typeof vi.fn> };
+
+  beforeEach(async () => {
+    const dbMod = await import('@/lib/db');
+    db = dbMod.db;
+    vi.mocked(db.delete).mockClear();
+    const mod = await import('@/app/api/auth/google/disconnect/route');
+    POST = mod.POST as unknown as () => Promise<Response>;
+  });
+
+  it('returns 200 and ok: true', async () => {
+    const res = await POST();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ ok: true });
+  });
+
+  it('deletes google tokens, calendar watch, and work_calendar_id config', async () => {
+    const { googleTokens, calendarWatch, appConfig } = await import('@/lib/schema');
+    await POST();
+    expect(db.delete).toHaveBeenCalledTimes(3);
+    expect(db.delete).toHaveBeenNthCalledWith(1, googleTokens);
+    expect(db.delete).toHaveBeenNthCalledWith(2, calendarWatch);
+    expect(db.delete).toHaveBeenNthCalledWith(3, appConfig);
+  });
+
+  it('returns 500 when db.delete throws', async () => {
+    vi.mocked(db.delete).mockReturnValueOnce({
+      where: vi.fn().mockRejectedValueOnce(new Error('DB error')),
+    } as unknown as ReturnType<typeof db.delete>);
+    const res = await POST();
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBeDefined();
+  });
+});
+
 describe('POST /api/webhooks/google-calendar', () => {
   let POST: (req: Request) => Promise<Response>;
 
@@ -307,7 +356,7 @@ describe('POST /api/webhooks/google-calendar', () => {
     expect(body.error).toContain('channel');
   });
 
-  it('returns 403 for unknown channel id', async () => {
+  it('returns 200 with ok and ignored for unknown channel (no 403)', async () => {
     const req = await makeNextRequest('/api/webhooks/google-calendar', {
       method: 'POST',
       headers: {
@@ -317,7 +366,33 @@ describe('POST /api/webhooks/google-calendar', () => {
       },
     });
     const res = await POST(req);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.ignored).toBe(true);
+  });
+
+  it('calls stopCalendarWatch when unknown channel resource URI matches work calendar', async () => {
+    const syncMod = await import('@/lib/google-calendar-sync');
+    const googleMod = await import('@/lib/google');
+    vi.mocked(syncMod.getWorkCalendarId).mockResolvedValueOnce('my-calendar@gmail.com');
+    vi.mocked(syncMod.getValidGoogleToken).mockResolvedValueOnce('fake-access-token');
+    vi.mocked(googleMod.stopCalendarWatch).mockResolvedValueOnce(undefined);
+
+    const req = await makeNextRequest('/api/webhooks/google-calendar', {
+      method: 'POST',
+      headers: {
+        'x-goog-channel-id': 'chan-123',
+        'x-goog-resource-id': 'res-456',
+        'x-goog-resource-state': 'exists',
+        'x-goog-resource-uri': 'https://www.googleapis.com/calendar/v3/calendars/my-calendar%40gmail.com/events',
+      },
+    });
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, ignored: true });
+    expect(googleMod.stopCalendarWatch).toHaveBeenCalledWith('fake-access-token', 'chan-123', 'res-456');
   });
 });
 

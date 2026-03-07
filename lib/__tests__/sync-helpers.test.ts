@@ -139,8 +139,12 @@ describe('stopCalendarWatch', () => {
 
     await stopCalendarWatch('test-token', 'channel-123', 'resource-456');
 
-    expect(mockFetch).toHaveBeenCalledOnce();
-    const [url, opts] = mockFetch.mock.calls[0];
+    const stopCall = mockFetch.mock.calls.find(
+      (call): call is [string, RequestInit] =>
+        typeof call[0] === 'string' && call[0].includes('googleapis.com/calendar/v3/channels/stop'),
+    );
+    expect(stopCall).toBeDefined();
+    const [url, opts] = stopCall!;
     expect(url).toBe('https://www.googleapis.com/calendar/v3/channels/stop');
     expect(opts?.method).toBe('POST');
     expect(opts?.headers).toMatchObject({
