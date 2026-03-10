@@ -11,10 +11,9 @@ dotenv.config({ path: resolve(__dirname, '../.env.local') });
 import { createPool } from '@vercel/postgres';
 
 async function main() {
-  const connectionString =
-    process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+  const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
-    console.error('DATABASE_URL or POSTGRES_URL required');
+    console.error('DATABASE_URL required');
     process.exit(1);
   }
 

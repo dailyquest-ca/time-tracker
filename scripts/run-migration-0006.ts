@@ -9,11 +9,10 @@ import { config } from 'dotenv';
 
 config({ path: resolve(join(__dirname, '..'), '.env.local') });
 
-const connectionString =
-  process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+const connectionString = process.env.DATABASE_URL;
 
 if (!connectionString) {
-  console.error('DATABASE_URL or POSTGRES_URL must be set');
+  console.error('DATABASE_URL must be set');
   process.exit(1);
 }
 

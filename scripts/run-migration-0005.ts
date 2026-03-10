@@ -6,11 +6,10 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { createPool } from '@vercel/postgres';
 
-const connectionString =
-  process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+const connectionString = process.env.DATABASE_URL;
 
 if (!connectionString) {
-  console.error('Missing DATABASE_URL or POSTGRES_URL in environment.');
+  console.error('Missing DATABASE_URL in environment.');
   process.exit(1);
 }
 

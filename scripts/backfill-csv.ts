@@ -64,9 +64,9 @@ const dailyTotals = pgTable('daily_totals', {
 
 // ── DB ───────────────────────────────────────────────────────────────────────
 
-const connectionString = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
-  console.error('ERROR: No DATABASE_URL or POSTGRES_URL found in .env.local');
+  console.error('ERROR: No DATABASE_URL found in .env.local');
   process.exit(1);
 }
 const pool = createPool({ connectionString });

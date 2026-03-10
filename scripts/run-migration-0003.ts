@@ -11,11 +11,10 @@ import { createPool } from '@vercel/postgres';
 import { config } from 'dotenv';
 config({ path: resolve(join(__dirname, '..'), '.env.local') });
 
-const connectionString =
-  process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+const connectionString = process.env.DATABASE_URL;
 
 if (!connectionString) {
-  console.error('Missing DATABASE_URL or POSTGRES_URL in environment.');
+  console.error('Missing DATABASE_URL in environment.');
   console.error('Cwd:', process.cwd(), '| Checked .env.local at:', resolve(join(__dirname, '..'), '.env.local'));
   process.exit(1);
 }

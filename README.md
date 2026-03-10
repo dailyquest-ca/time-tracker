@@ -16,7 +16,7 @@ Track daily work hours from a single **Google Calendar** (your Work calendar). T
    - Do not commit `.env.local` (it is gitignored).
 
 2. **Database**
-   - Create a Vercel Postgres (or any Postgres) database and set `POSTGRES_URL` or `DATABASE_URL`.
+   - Create a Postgres database and set `DATABASE_URL`.
    - Run the migration: apply `drizzle/0001_google_calendar.sql` to your database (or use `npm run db:push` if your schema is in sync).
 
 3. **Google Calendar**
@@ -34,7 +34,7 @@ Track daily work hours from a single **Google Calendar** (your Work calendar). T
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` – Google OAuth (Calendar read-only)
 - `APP_URL` – Public app URL for calendar push notifications (e.g. `https://your-app.vercel.app`). On Vercel, `VERCEL_URL` is set automatically.
 - `CRON_SECRET` – Optional; set in Vercel and use as `Authorization: Bearer <CRON_SECRET>` for the cron job that renews the calendar watch and runs sync.
-- `POSTGRES_URL` or `DATABASE_URL` – Postgres connection string.
+- `DATABASE_URL` – Postgres connection string.
 
 ## Real-time updates
 

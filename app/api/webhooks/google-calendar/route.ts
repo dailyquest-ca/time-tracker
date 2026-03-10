@@ -14,17 +14,27 @@ import { NextRequest, NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-async function isKnownChannel(channelId: string, resourceId: string | null): Promise<boolean> {
+async function getKnownChannelStatus(channelId: string, resourceId: string | null): Promise<{
+  trusted: boolean;
+  storedChannelId: string | null;
+  storedResourceId: string | null;
+}> {
   const rows = await db
     .select({ channelId: calendarWatch.channelId, resourceId: calendarWatch.resourceId })
     .from(calendarWatch)
     .where(eq(calendarWatch.userId, 'default'))
     .limit(1);
-  if (rows.length === 0) return false;
+  if (rows.length === 0) {
+    return { trusted: false, storedChannelId: null, storedResourceId: null };
+  }
   const watch = rows[0];
-  if (watch.channelId !== channelId) return false;
-  if (resourceId && watch.resourceId !== resourceId) return false;
-  return true;
+  const trusted =
+    watch.channelId === channelId && (!resourceId || watch.resourceId === resourceId);
+  return {
+    trusted,
+    storedChannelId: watch.channelId,
+    storedResourceId: watch.resourceId,
+  };
 }
 
 function calendarIdFromResourceUri(resourceUri: string | null): string | null {
@@ -51,8 +61,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing channel id' }, { status: 400 });
   }
 
-  const trusted = await isKnownChannel(channelId, resourceId);
-  if (!trusted) {
+  const channelStatus = await getKnownChannelStatus(channelId, resourceId);
+  if (!channelStatus.trusted) {
     const uriCalendarId = calendarIdFromResourceUri(resourceUri);
     const workCalendarId = await getWorkCalendarId().catch(() => null);
 

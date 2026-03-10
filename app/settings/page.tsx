@@ -386,9 +386,9 @@ export default function SettingsPage() {
 
         {urlError && (
           <div className="mb-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" role="alert">
-            {urlError.includes('missing_connection_string') || urlError.includes('POSTGRES_URL') ? (
+            {urlError.includes('missing_connection_string') || urlError.includes('DATABASE_URL') ? (
               <>
-                <strong>Database not configured.</strong> Add a Vercel Postgres database in your Vercel project (Storage → Create Database), then add the <code className="bg-amber-100 px-1 rounded">POSTGRES_URL</code> environment variable and redeploy.
+                <strong>Database not configured.</strong> Add a database connection string as the <code className="bg-amber-100 px-1 rounded">DATABASE_URL</code> environment variable and redeploy.
               </>
             ) : (
               urlError
