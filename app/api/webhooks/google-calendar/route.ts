@@ -63,14 +63,21 @@ export async function POST(request: NextRequest) {
 
   const channelStatus = await getKnownChannelStatus(channelId, resourceId);
   if (!channelStatus.trusted) {
-    const uriCalendarId = calendarIdFromResourceUri(resourceUri);
-    const workCalendarId = await getWorkCalendarId().catch(() => null);
-
-    if (resourceId && uriCalendarId && workCalendarId && uriCalendarId === workCalendarId) {
+    if (resourceId) {
+      const uriCalendarId = calendarIdFromResourceUri(resourceUri);
+      const workCalendarId = await getWorkCalendarId().catch(() => null);
       const accessToken = await getValidGoogleToken().catch(() => null);
+
       if (accessToken) {
         try {
           await stopCalendarWatch(accessToken, channelId, resourceId);
+          console.log(
+            '[webhook] Stopped stale channel',
+            channelId,
+            uriCalendarId && workCalendarId
+              ? `(calendar: ${uriCalendarId}, work: ${workCalendarId})`
+              : '',
+          );
         } catch {
           // best-effort
         }

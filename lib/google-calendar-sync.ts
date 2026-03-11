@@ -27,7 +27,7 @@ const ROLLING_FUTURE_DAYS = 30;
 const SYNC_STATE_KEY = 'calendar_sync_state';
 const LAST_SYNCED_KEY = 'last_synced_at';
 const WEBHOOK_DEBOUNCE_KEY = 'webhook_sync_started_at';
-const WEBHOOK_DEBOUNCE_MS = 5_000;
+const WEBHOOK_DEBOUNCE_MS = 30_000;
 
 interface SyncState {
   calendarId: string;
@@ -340,9 +340,25 @@ export async function ensureCalendarWatch(): Promise<{
       .from(calendarWatch)
       .where(eq(calendarWatch.userId, USER_ID))
       .limit(1);
+
     if (existingRows.length > 0) {
       const old = existingRows[0];
-      await stopCalendarWatch(accessToken, old.channelId, old.resourceId);
+      const stillValid =
+        old.calendarId === calId &&
+        new Date(old.expiration).getTime() - 24 * 60 * 60 * 1000 > Date.now();
+      if (stillValid) {
+        return { ok: true };
+      }
+      try {
+        await stopCalendarWatch(accessToken, old.channelId, old.resourceId);
+      } catch (stopErr) {
+        console.warn(
+          '[watch] Failed to stop old channel',
+          old.channelId,
+          '— creating new one anyway:',
+          stopErr instanceof Error ? stopErr.message : stopErr,
+        );
+      }
     }
 
     const channel = await createCalendarWatch(accessToken, calId, address, {
@@ -369,7 +385,7 @@ export async function ensureCalendarWatch(): Promise<{
           updatedAt: new Date(),
         },
       });
-    console.warn('[watch] Created: Google will POST to', address);
+    console.log('[watch] Created: Google will POST to', address);
     return { ok: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -408,21 +424,17 @@ export async function renewCalendarWatchIfNeeded(): Promise<boolean> {
   if (rows.length === 0) return false;
   const row = rows[0];
   const oneDayMs = 24 * 60 * 60 * 1000;
-  if (new Date(row.expiration).getTime() - oneDayMs > Date.now()) return false;
+  const expiring = new Date(row.expiration).getTime() - oneDayMs <= Date.now();
+
+  const currentCalId = await getWorkCalendarId();
+  const calendarChanged = currentCalId != null && row.calendarId !== currentCalId;
+
+  if (!expiring && !calendarChanged) return false;
   const result = await ensureCalendarWatch();
   return result.ok;
 }
 
 async function ensureWatchIfNeeded(): Promise<string | undefined> {
-  const watchRows = await db
-    .select()
-    .from(calendarWatch)
-    .where(eq(calendarWatch.userId, USER_ID))
-    .limit(1);
-  const watchValid =
-    watchRows.length > 0 &&
-    new Date(watchRows[0].expiration).getTime() > Date.now();
-  if (watchValid) return undefined;
   const watchResult = await ensureCalendarWatch().catch((e) => ({
     ok: false as const,
     error: e instanceof Error ? e.message : String(e),

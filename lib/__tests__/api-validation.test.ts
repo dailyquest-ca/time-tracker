@@ -330,12 +330,14 @@ describe('GET /api/sync/watch-status', () => {
 
 describe('POST /api/auth/google/disconnect', () => {
   let POST: () => Promise<Response>;
-  let db: { delete: ReturnType<typeof vi.fn> };
+  let db: { select: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> };
 
   beforeEach(async () => {
+    vi.resetModules();
     const dbMod = await import('@/lib/db');
     db = dbMod.db;
     vi.mocked(db.delete).mockClear();
+    vi.mocked(db.select).mockClear();
     const mod = await import('@/app/api/auth/google/disconnect/route');
     POST = mod.POST as unknown as () => Promise<Response>;
   });
@@ -347,16 +349,55 @@ describe('POST /api/auth/google/disconnect', () => {
     expect(body).toEqual({ ok: true });
   });
 
-  it('deletes google tokens, calendar watch, and work_calendar_id config', async () => {
-    const { googleTokens, calendarWatch, appConfig } = await import('@/lib/schema');
-    await POST();
-    expect(db.delete).toHaveBeenCalledTimes(3);
-    expect(db.delete).toHaveBeenNthCalledWith(1, googleTokens);
-    expect(db.delete).toHaveBeenNthCalledWith(2, calendarWatch);
-    expect(db.delete).toHaveBeenNthCalledWith(3, appConfig);
+  it('stops the remote Google channel before deleting local state', async () => {
+    const googleMod = await import('@/lib/google');
+    vi.mocked(googleMod.stopCalendarWatch).mockClear();
+
+    const fakeToken = {
+      userId: 'default',
+      accessToken: 'tok-123',
+      refreshToken: 'ref-456',
+      expiresAt: new Date(Date.now() + 3600_000),
+      updatedAt: new Date(),
+    };
+    const fakeWatch = {
+      userId: 'default',
+      calendarId: 'cal@group.calendar.google.com',
+      channelId: 'chan-abc',
+      resourceId: 'res-def',
+      expiration: new Date(Date.now() + 86400_000),
+      updatedAt: new Date(),
+    };
+
+    vi.mocked(db.select)
+      .mockReturnValueOnce({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([fakeToken]),
+          }),
+        }),
+      } as never)
+      .mockReturnValueOnce({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([fakeWatch]),
+          }),
+        }),
+      } as never);
+
+    const res = await POST();
+    expect(res.status).toBe(200);
+    expect(googleMod.stopCalendarWatch).toHaveBeenCalledWith('tok-123', 'chan-abc', 'res-def');
   });
 
   it('returns 500 when db.delete throws', async () => {
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    } as never);
     vi.mocked(db.delete).mockReturnValueOnce({
       where: vi.fn().mockRejectedValueOnce(new Error('DB error')),
     } as unknown as ReturnType<typeof db.delete>);
@@ -422,6 +463,29 @@ describe('POST /api/webhooks/google-calendar', () => {
     expect(res.status).toBe(200);
     expect(body).toMatchObject({ ok: true, ignored: true });
     expect(googleMod.stopCalendarWatch).toHaveBeenCalledWith('fake-access-token', 'chan-123', 'res-456');
+  });
+
+  it('stops any untrusted channel with a resourceId, even without matching work calendar', async () => {
+    const syncMod = await import('@/lib/google-calendar-sync');
+    const googleMod = await import('@/lib/google');
+    vi.mocked(syncMod.getWorkCalendarId).mockResolvedValueOnce(null);
+    vi.mocked(syncMod.getValidGoogleToken).mockResolvedValueOnce('tok-999');
+    vi.mocked(googleMod.stopCalendarWatch).mockClear();
+    vi.mocked(googleMod.stopCalendarWatch).mockResolvedValueOnce(undefined);
+
+    const req = await makeNextRequest('/api/webhooks/google-calendar', {
+      method: 'POST',
+      headers: {
+        'x-goog-channel-id': 'stale-chan',
+        'x-goog-resource-id': 'stale-res',
+        'x-goog-resource-state': 'exists',
+      },
+    });
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, ignored: true });
+    expect(googleMod.stopCalendarWatch).toHaveBeenCalledWith('tok-999', 'stale-chan', 'stale-res');
   });
 
   it('returns 200 with throttled:true when debounce fires', async () => {

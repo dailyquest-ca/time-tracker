@@ -1,4 +1,4 @@
-import { db } from '@/lib/db';
+import { db, getDbTarget } from '@/lib/db';
 import { googleTokens } from '@/lib/schema';
 import { eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
@@ -11,7 +11,10 @@ export async function GET() {
     .from(googleTokens)
     .where(eq(googleTokens.userId, 'default'))
     .limit(1);
+  const dbTarget = getDbTarget();
   return NextResponse.json({
     googleConnected: !!googleToken && googleRows.length > 0,
+    dbHost: dbTarget?.host ?? null,
+    dbName: dbTarget?.database ?? null,
   });
 }
