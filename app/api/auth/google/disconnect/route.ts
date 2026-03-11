@@ -28,10 +28,17 @@ export async function POST() {
     if (tokenRows.length > 0 && watchRows.length > 0) {
       const token = tokenRows[0];
       const watch = watchRows[0];
-      try {
-        await stopCalendarWatch(token.accessToken, watch.channelId, watch.resourceId);
-      } catch {
-        console.warn('[disconnect] Could not stop remote Google channel (best-effort)');
+      const stopResult = await stopCalendarWatch(
+        token.accessToken,
+        watch.channelId,
+        watch.resourceId,
+      );
+      if (!stopResult.ok) {
+        console.warn(
+          '[disconnect] Could not stop remote Google channel',
+          watch.channelId,
+          `(${stopResult.status}${stopResult.httpStatus ? ` ${stopResult.httpStatus}` : ''})`,
+        );
       }
     }
 

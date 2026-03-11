@@ -27,6 +27,8 @@ const ROLLING_FUTURE_DAYS = 30;
 const SYNC_STATE_KEY = 'calendar_sync_state';
 const LAST_SYNCED_KEY = 'last_synced_at';
 const WEBHOOK_DEBOUNCE_KEY = 'webhook_sync_started_at';
+const WEBHOOK_RECEIVED_KEY = 'last_webhook_received_at';
+const LEGACY_WEBHOOK_RECEIVED_KEY = 'last_legacy_webhook_received_at';
 const WEBHOOK_DEBOUNCE_MS = 30_000;
 
 interface SyncState {
@@ -192,6 +194,52 @@ export async function stampWebhookSyncStarted(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Webhook receipt tracking
+// ---------------------------------------------------------------------------
+
+export async function stampWebhookReceived(): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .insert(appConfig)
+    .values({ key: WEBHOOK_RECEIVED_KEY, value: now, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: appConfig.key,
+      set: { value: now, updatedAt: new Date() },
+    });
+}
+
+export async function getLastWebhookReceivedAt(): Promise<string | null> {
+  const rows = await db
+    .select()
+    .from(appConfig)
+    .where(eq(appConfig.key, WEBHOOK_RECEIVED_KEY))
+    .limit(1);
+  const val = rows[0]?.value;
+  return typeof val === 'string' ? val : null;
+}
+
+export async function stampLegacyWebhookReceived(): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .insert(appConfig)
+    .values({ key: LEGACY_WEBHOOK_RECEIVED_KEY, value: now, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: appConfig.key,
+      set: { value: now, updatedAt: new Date() },
+    });
+}
+
+export async function getLastLegacyWebhookReceivedAt(): Promise<string | null> {
+  const rows = await db
+    .select()
+    .from(appConfig)
+    .where(eq(appConfig.key, LEGACY_WEBHOOK_RECEIVED_KEY))
+    .limit(1);
+  const val = rows[0]?.value;
+  return typeof val === 'string' ? val : null;
+}
+
+// ---------------------------------------------------------------------------
 // Last-synced timestamp
 // ---------------------------------------------------------------------------
 
@@ -349,14 +397,13 @@ export async function ensureCalendarWatch(): Promise<{
       if (stillValid) {
         return { ok: true };
       }
-      try {
-        await stopCalendarWatch(accessToken, old.channelId, old.resourceId);
-      } catch (stopErr) {
+      const stopResult = await stopCalendarWatch(accessToken, old.channelId, old.resourceId);
+      if (!stopResult.ok) {
         console.warn(
           '[watch] Failed to stop old channel',
           old.channelId,
-          '— creating new one anyway:',
-          stopErr instanceof Error ? stopErr.message : stopErr,
+          `— creating new one anyway (${stopResult.status}${stopResult.httpStatus ? ` ${stopResult.httpStatus}` : ''}):`,
+          stopResult.message ?? 'unknown error',
         );
       }
     }
@@ -397,22 +444,63 @@ export async function ensureCalendarWatch(): Promise<{
 export async function getWatchStatus(): Promise<{
   status: 'active' | 'expiring_soon' | 'expired' | 'missing';
   expiration?: string;
+  channelId?: string;
+  resourceId?: string;
+  lastWebhookAt?: string | null;
+  lastLegacyWebhookAt?: string | null;
 }> {
   const rows = await db
     .select()
     .from(calendarWatch)
     .where(eq(calendarWatch.userId, USER_ID))
     .limit(1);
-  if (rows.length === 0) return { status: 'missing' };
+  const lastWebhookAt = await getLastWebhookReceivedAt();
+  const lastLegacyWebhookAt = await getLastLegacyWebhookReceivedAt();
+  if (rows.length === 0) return { status: 'missing', lastWebhookAt, lastLegacyWebhookAt };
   const row = rows[0];
   const exp = new Date(row.expiration);
   const now = Date.now();
+  const common = {
+    expiration: exp.toISOString(),
+    channelId: row.channelId,
+    resourceId: row.resourceId,
+    lastWebhookAt,
+    lastLegacyWebhookAt,
+  };
   if (exp.getTime() <= now)
-    return { status: 'expired', expiration: exp.toISOString() };
+    return { status: 'expired', ...common };
   const oneDayMs = 24 * 60 * 60 * 1000;
   if (exp.getTime() - oneDayMs <= now)
-    return { status: 'expiring_soon', expiration: exp.toISOString() };
-  return { status: 'active', expiration: exp.toISOString() };
+    return { status: 'expiring_soon', ...common };
+  return { status: 'active', ...common };
+}
+
+export async function forceRecreateWatch(): Promise<{
+  ok: boolean;
+  error?: string;
+}> {
+  const accessToken = await getValidGoogleToken();
+  if (!accessToken) return { ok: false, error: 'Not connected to Google.' };
+
+  const existingRows = await db
+    .select()
+    .from(calendarWatch)
+    .where(eq(calendarWatch.userId, USER_ID))
+    .limit(1);
+  if (existingRows.length > 0) {
+    const old = existingRows[0];
+    const stopResult = await stopCalendarWatch(accessToken, old.channelId, old.resourceId);
+    if (!stopResult.ok) {
+      console.warn(
+        '[watch] Force recreate could not stop old channel',
+        old.channelId,
+        `(${stopResult.status}${stopResult.httpStatus ? ` ${stopResult.httpStatus}` : ''})`,
+      );
+    }
+    await db.delete(calendarWatch).where(eq(calendarWatch.userId, USER_ID));
+  }
+
+  return ensureCalendarWatch();
 }
 
 export async function renewCalendarWatchIfNeeded(): Promise<boolean> {

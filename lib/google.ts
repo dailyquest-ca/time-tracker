@@ -36,6 +36,13 @@ export interface EventListResult {
   nextSyncToken?: string;
 }
 
+export interface StopCalendarWatchResult {
+  ok: boolean;
+  status: 'stopped' | 'forbidden' | 'not_found' | 'error';
+  httpStatus?: number;
+  message?: string;
+}
+
 function getEnv(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env: ${name}`);
@@ -235,15 +242,16 @@ export async function listCalendarEventsIncremental(
 
 /**
  * Stop (cancel) an existing push notification channel.
- * Best-effort: does not throw on failure since the channel may already be expired.
+ * Returns structured outcomes so callers can distinguish legacy/unrevokeable
+ * channels from successfully stopped ones.
  */
 export async function stopCalendarWatch(
   accessToken: string,
   channelId: string,
   resourceId: string,
-): Promise<void> {
+): Promise<StopCalendarWatchResult> {
   try {
-    await fetch('https://www.googleapis.com/calendar/v3/channels/stop', {
+    const res = await fetch('https://www.googleapis.com/calendar/v3/channels/stop', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -251,8 +259,38 @@ export async function stopCalendarWatch(
       },
       body: JSON.stringify({ id: channelId, resourceId }),
     });
+    if (res.ok) {
+      return { ok: true, status: 'stopped', httpStatus: res.status };
+    }
+    const text = await res.text();
+    if (res.status === 403) {
+      return {
+        ok: false,
+        status: 'forbidden',
+        httpStatus: res.status,
+        message: text,
+      };
+    }
+    if (res.status === 404) {
+      return {
+        ok: false,
+        status: 'not_found',
+        httpStatus: res.status,
+        message: text,
+      };
+    }
+    return {
+      ok: false,
+      status: 'error',
+      httpStatus: res.status,
+      message: text,
+    };
   } catch {
-    // Best effort — channel may already be expired or invalid
+    return {
+      ok: false,
+      status: 'error',
+      message: 'Network error while stopping channel',
+    };
   }
 }
 

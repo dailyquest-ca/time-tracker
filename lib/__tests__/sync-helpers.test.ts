@@ -249,7 +249,7 @@ describe('stopCalendarWatch', () => {
       new Response(null, { status: 204 }),
     );
 
-    await stopCalendarWatch('test-token', 'channel-123', 'resource-456');
+    const result = await stopCalendarWatch('test-token', 'channel-123', 'resource-456');
 
     const stopCall = mockFetch.mock.calls.find(
       (call): call is [string, RequestInit] =>
@@ -265,15 +265,48 @@ describe('stopCalendarWatch', () => {
     });
     const body = JSON.parse(opts?.body as string);
     expect(body).toEqual({ id: 'channel-123', resourceId: 'resource-456' });
+    expect(result).toMatchObject({ ok: true, status: 'stopped', httpStatus: 204 });
   });
 
-  it('does not throw on non-2xx response (best effort)', async () => {
+  it('returns forbidden result on 403 response', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('Incorrect OAuth client', { status: 403 }),
+    );
+
+    await expect(
+      stopCalendarWatch('test-token', 'channel-123', 'resource-456'),
+    ).resolves.toMatchObject({
+      ok: false,
+      status: 'forbidden',
+      httpStatus: 403,
+      message: 'Incorrect OAuth client',
+    });
+  });
+
+  it('returns not_found result on 404 response', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response('Not Found', { status: 404 }),
     );
 
     await expect(
       stopCalendarWatch('test-token', 'channel-123', 'resource-456'),
-    ).resolves.not.toThrow();
+    ).resolves.toMatchObject({
+      ok: false,
+      status: 'not_found',
+      httpStatus: 404,
+      message: 'Not Found',
+    });
+  });
+
+  it('returns error result on network failure', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('boom'));
+
+    await expect(
+      stopCalendarWatch('test-token', 'channel-123', 'resource-456'),
+    ).resolves.toMatchObject({
+      ok: false,
+      status: 'error',
+      message: 'Network error while stopping channel',
+    });
   });
 });

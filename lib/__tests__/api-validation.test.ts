@@ -58,9 +58,19 @@ vi.mock('@/lib/google-calendar-sync', () => ({
   getValidGoogleToken: vi.fn().mockResolvedValue(null),
   getWorkCalendarId: vi.fn().mockResolvedValue(null),
   ensureCalendarWatch: vi.fn().mockResolvedValue({ ok: true }),
+  forceRecreateWatch: vi.fn().mockResolvedValue({ ok: true }),
   getLastSyncedAt: vi.fn().mockResolvedValue('2026-03-05T12:00:00.000Z'),
-  getWatchStatus: vi.fn().mockResolvedValue({ status: 'active', expiration: '2026-03-12T00:00:00.000Z' }),
+  getWatchStatus: vi.fn().mockResolvedValue({
+    status: 'active',
+    expiration: '2026-03-12T00:00:00.000Z',
+    channelId: 'chan-1',
+    resourceId: 'res-1',
+    lastWebhookAt: '2026-03-05T11:00:00.000Z',
+    lastLegacyWebhookAt: '2026-03-05T10:00:00.000Z',
+  }),
   shouldThrottleWebhookSync: vi.fn().mockResolvedValue(false),
+  stampLegacyWebhookReceived: vi.fn().mockResolvedValue(undefined),
+  stampWebhookReceived: vi.fn().mockResolvedValue(undefined),
   stampWebhookSyncStarted: vi.fn().mockResolvedValue(undefined),
   renewCalendarWatchIfNeeded: vi.fn().mockResolvedValue(false),
 }));
@@ -78,7 +88,7 @@ vi.mock('@/lib/google', async () => {
   const actual = await vi.importActual<typeof import('@/lib/google')>('@/lib/google');
   return {
     ...actual,
-    stopCalendarWatch: vi.fn().mockResolvedValue(undefined),
+    stopCalendarWatch: vi.fn().mockResolvedValue({ ok: true, status: 'stopped', httpStatus: 204 }),
   };
 });
 
@@ -318,13 +328,49 @@ describe('GET /api/sync/watch-status', () => {
     GET = mod.GET as unknown as () => Promise<Response>;
   });
 
-  it('returns 200 with watch status', async () => {
+  it('returns 200 with watch status including channel diagnostics', async () => {
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toHaveProperty('status');
     expect(body.status).toBe('active');
     expect(body).toHaveProperty('expiration');
+    expect(body).toHaveProperty('channelId', 'chan-1');
+    expect(body).toHaveProperty('resourceId', 'res-1');
+    expect(body).toHaveProperty('lastWebhookAt', '2026-03-05T11:00:00.000Z');
+    expect(body).toHaveProperty('lastLegacyWebhookAt', '2026-03-05T10:00:00.000Z');
+  });
+});
+
+describe('POST /api/sync/watch-status (force-recreate)', () => {
+  let POST: () => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const mod = await import('@/app/api/sync/watch-status/route');
+    POST = mod.POST as unknown as () => Promise<Response>;
+  });
+
+  it('returns 200 with ok and fresh watch status', async () => {
+    const res = await POST();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.watch).toHaveProperty('status', 'active');
+    expect(body.watch).toHaveProperty('channelId');
+  });
+
+  it('returns 500 when forceRecreateWatch fails', async () => {
+    const syncMod = await import('@/lib/google-calendar-sync');
+    vi.mocked(syncMod.forceRecreateWatch).mockResolvedValueOnce({
+      ok: false,
+      error: 'Not connected to Google.',
+    });
+    const res = await POST();
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.error).toContain('Google');
   });
 });
 
@@ -390,6 +436,47 @@ describe('POST /api/auth/google/disconnect', () => {
     expect(googleMod.stopCalendarWatch).toHaveBeenCalledWith('tok-123', 'chan-abc', 'res-def');
   });
 
+  it('still succeeds when stopCalendarWatch returns forbidden', async () => {
+    const googleMod = await import('@/lib/google');
+    vi.mocked(googleMod.stopCalendarWatch).mockResolvedValueOnce({
+      ok: false,
+      status: 'forbidden',
+      httpStatus: 403,
+      message: 'Incorrect OAuth client',
+    });
+    vi.mocked(db.select)
+      .mockReturnValueOnce({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([{
+              userId: 'default',
+              accessToken: 'tok-123',
+              refreshToken: 'ref-456',
+              expiresAt: new Date(Date.now() + 3600_000),
+              updatedAt: new Date(),
+            }]),
+          }),
+        }),
+      } as never)
+      .mockReturnValueOnce({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([{
+              userId: 'default',
+              calendarId: 'cal@group.calendar.google.com',
+              channelId: 'chan-abc',
+              resourceId: 'res-def',
+              expiration: new Date(Date.now() + 86400_000),
+              updatedAt: new Date(),
+            }]),
+          }),
+        }),
+      } as never);
+
+    const res = await POST();
+    expect(res.status).toBe(200);
+  });
+
   it('returns 500 when db.delete throws', async () => {
     vi.mocked(db.select).mockReturnValue({
       from: vi.fn().mockReturnValue({
@@ -442,42 +529,47 @@ describe('POST /api/webhooks/google-calendar', () => {
     expect(body.ignored).toBe(true);
   });
 
-  it('calls stopCalendarWatch when unknown channel resource URI matches work calendar', async () => {
+  it('ignores unknown channel without calling Google stop', async () => {
     const syncMod = await import('@/lib/google-calendar-sync');
     const googleMod = await import('@/lib/google');
-    vi.mocked(syncMod.getWorkCalendarId).mockResolvedValueOnce('my-calendar@gmail.com');
-    vi.mocked(syncMod.getValidGoogleToken).mockResolvedValueOnce('fake-access-token');
-    vi.mocked(googleMod.stopCalendarWatch).mockResolvedValueOnce(undefined);
+    const dbMod = await import('@/lib/db');
+
+    vi.mocked(googleMod.stopCalendarWatch).mockClear();
+    vi.mocked(syncMod.stampLegacyWebhookReceived).mockClear();
+
+    vi.mocked(dbMod.db.select).mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([{ channelId: 'active-chan', resourceId: 'active-res' }]),
+        }),
+      }),
+    } as never);
 
     const req = await makeNextRequest('/api/webhooks/google-calendar', {
       method: 'POST',
       headers: {
-        'x-goog-channel-id': 'chan-123',
-        'x-goog-resource-id': 'res-456',
+        'x-goog-channel-id': 'old-chan',
+        'x-goog-resource-id': 'old-res',
         'x-goog-resource-state': 'exists',
-        'x-goog-resource-uri': 'https://www.googleapis.com/calendar/v3/calendars/my-calendar%40gmail.com/events',
       },
     });
     const res = await POST(req);
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body).toMatchObject({ ok: true, ignored: true });
-    expect(googleMod.stopCalendarWatch).toHaveBeenCalledWith('fake-access-token', 'chan-123', 'res-456');
+    expect(googleMod.stopCalendarWatch).not.toHaveBeenCalled();
+    expect(syncMod.stampLegacyWebhookReceived).toHaveBeenCalledTimes(1);
   });
 
-  it('stops any untrusted channel with a resourceId, even without matching work calendar', async () => {
-    const syncMod = await import('@/lib/google-calendar-sync');
+  it('does NOT stop unknown channel when no stored watch exists', async () => {
     const googleMod = await import('@/lib/google');
-    vi.mocked(syncMod.getWorkCalendarId).mockResolvedValueOnce(null);
-    vi.mocked(syncMod.getValidGoogleToken).mockResolvedValueOnce('tok-999');
     vi.mocked(googleMod.stopCalendarWatch).mockClear();
-    vi.mocked(googleMod.stopCalendarWatch).mockResolvedValueOnce(undefined);
 
     const req = await makeNextRequest('/api/webhooks/google-calendar', {
       method: 'POST',
       headers: {
-        'x-goog-channel-id': 'stale-chan',
-        'x-goog-resource-id': 'stale-res',
+        'x-goog-channel-id': 'mystery-chan',
+        'x-goog-resource-id': 'mystery-res',
         'x-goog-resource-state': 'exists',
       },
     });
@@ -485,7 +577,39 @@ describe('POST /api/webhooks/google-calendar', () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body).toMatchObject({ ok: true, ignored: true });
-    expect(googleMod.stopCalendarWatch).toHaveBeenCalledWith('tok-999', 'stale-chan', 'stale-res');
+    expect(googleMod.stopCalendarWatch).not.toHaveBeenCalled();
+  });
+
+  it('records legacy noise even when a stored watch exists', async () => {
+    const syncMod = await import('@/lib/google-calendar-sync');
+    const googleMod = await import('@/lib/google');
+    const dbMod = await import('@/lib/db');
+
+    vi.mocked(googleMod.stopCalendarWatch).mockClear();
+    vi.mocked(syncMod.stampLegacyWebhookReceived).mockClear();
+
+    vi.mocked(dbMod.db.select).mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([{ channelId: 'active-chan', resourceId: 'active-res' }]),
+        }),
+      }),
+    } as never);
+
+    const req = await makeNextRequest('/api/webhooks/google-calendar', {
+      method: 'POST',
+      headers: {
+        'x-goog-channel-id': 'other-chan',
+        'x-goog-resource-id': 'other-res',
+        'x-goog-resource-state': 'exists',
+      },
+    });
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, ignored: true });
+    expect(googleMod.stopCalendarWatch).not.toHaveBeenCalled();
+    expect(syncMod.stampLegacyWebhookReceived).toHaveBeenCalledTimes(1);
   });
 
   it('returns 200 with throttled:true when debounce fires', async () => {
