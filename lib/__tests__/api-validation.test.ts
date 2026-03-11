@@ -60,11 +60,13 @@ vi.mock('@/lib/google-calendar-sync', () => ({
   ensureCalendarWatch: vi.fn().mockResolvedValue({ ok: true }),
   forceRecreateWatch: vi.fn().mockResolvedValue({ ok: true }),
   getLastSyncedAt: vi.fn().mockResolvedValue('2026-03-05T12:00:00.000Z'),
+  getWebhookEndpoint: vi.fn().mockReturnValue('https://example.com/api/webhooks/google-calendar-v2'),
   getWatchStatus: vi.fn().mockResolvedValue({
     status: 'active',
     expiration: '2026-03-12T00:00:00.000Z',
     channelId: 'chan-1',
     resourceId: 'res-1',
+    webhookEndpoint: 'https://example.com/api/webhooks/google-calendar-v2',
     lastWebhookAt: '2026-03-05T11:00:00.000Z',
     lastLegacyWebhookAt: '2026-03-05T10:00:00.000Z',
   }),
@@ -328,7 +330,7 @@ describe('GET /api/sync/watch-status', () => {
     GET = mod.GET as unknown as () => Promise<Response>;
   });
 
-  it('returns 200 with watch status including channel diagnostics', async () => {
+  it('returns 200 with watch status including channel diagnostics and endpoint', async () => {
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -337,6 +339,7 @@ describe('GET /api/sync/watch-status', () => {
     expect(body).toHaveProperty('expiration');
     expect(body).toHaveProperty('channelId', 'chan-1');
     expect(body).toHaveProperty('resourceId', 'res-1');
+    expect(body).toHaveProperty('webhookEndpoint', 'https://example.com/api/webhooks/google-calendar-v2');
     expect(body).toHaveProperty('lastWebhookAt', '2026-03-05T11:00:00.000Z');
     expect(body).toHaveProperty('lastLegacyWebhookAt', '2026-03-05T10:00:00.000Z');
   });
@@ -495,16 +498,71 @@ describe('POST /api/auth/google/disconnect', () => {
   });
 });
 
-describe('POST /api/webhooks/google-calendar', () => {
+describe('POST /api/webhooks/google-calendar (legacy sink)', () => {
   let POST: (req: Request) => Promise<Response>;
 
   beforeEach(async () => {
+    vi.resetModules();
     const mod = await import('@/app/api/webhooks/google-calendar/route');
     POST = mod.POST as unknown as (req: Request) => Promise<Response>;
   });
 
-  it('returns 400 when channel id header is missing', async () => {
+  it('always returns 200 with legacy flag', async () => {
     const req = await makeNextRequest('/api/webhooks/google-calendar', {
+      method: 'POST',
+      headers: {
+        'x-goog-channel-id': 'any-channel',
+        'x-goog-resource-state': 'exists',
+      },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: true, legacy: true });
+  });
+
+  it('records legacy webhook receipt', async () => {
+    const syncMod = await import('@/lib/google-calendar-sync');
+    vi.mocked(syncMod.stampLegacyWebhookReceived).mockClear();
+
+    const req = await makeNextRequest('/api/webhooks/google-calendar', {
+      method: 'POST',
+      headers: {
+        'x-goog-channel-id': 'spam-channel',
+        'x-goog-resource-state': 'exists',
+      },
+    });
+    await POST(req);
+    expect(syncMod.stampLegacyWebhookReceived).toHaveBeenCalledTimes(1);
+  });
+
+  it('never triggers sync on the legacy endpoint', async () => {
+    const syncMod = await import('@/lib/google-calendar-sync');
+    vi.mocked(syncMod.runGoogleCalendarSync).mockClear();
+
+    const req = await makeNextRequest('/api/webhooks/google-calendar', {
+      method: 'POST',
+      headers: {
+        'x-goog-channel-id': 'any-channel',
+        'x-goog-resource-state': 'exists',
+      },
+    });
+    await POST(req);
+    expect(syncMod.runGoogleCalendarSync).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/webhooks/google-calendar-v2', () => {
+  let POST: (req: Request) => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const mod = await import('@/app/api/webhooks/google-calendar-v2/route');
+    POST = mod.POST as unknown as (req: Request) => Promise<Response>;
+  });
+
+  it('returns 400 when channel id header is missing', async () => {
+    const req = await makeNextRequest('/api/webhooks/google-calendar-v2', {
       method: 'POST',
     });
     const res = await POST(req);
@@ -513,8 +571,8 @@ describe('POST /api/webhooks/google-calendar', () => {
     expect(body.error).toContain('channel');
   });
 
-  it('returns 200 with ok and ignored for unknown channel (no 403)', async () => {
-    const req = await makeNextRequest('/api/webhooks/google-calendar', {
+  it('returns 200 with ignored for untrusted channel', async () => {
+    const req = await makeNextRequest('/api/webhooks/google-calendar-v2', {
       method: 'POST',
       headers: {
         'x-goog-channel-id': 'unknown-channel',
@@ -525,91 +583,33 @@ describe('POST /api/webhooks/google-calendar', () => {
     const res = await POST(req);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(body.ignored).toBe(true);
+    expect(body).toMatchObject({ ok: true, ignored: true });
   });
 
-  it('ignores unknown channel without calling Google stop', async () => {
+  it('stamps webhook received for trusted channel', async () => {
     const syncMod = await import('@/lib/google-calendar-sync');
-    const googleMod = await import('@/lib/google');
     const dbMod = await import('@/lib/db');
 
-    vi.mocked(googleMod.stopCalendarWatch).mockClear();
-    vi.mocked(syncMod.stampLegacyWebhookReceived).mockClear();
+    vi.mocked(syncMod.stampWebhookReceived).mockClear();
 
     vi.mocked(dbMod.db.select).mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([{ channelId: 'active-chan', resourceId: 'active-res' }]),
+          limit: vi.fn().mockResolvedValue([{ channelId: 'known-chan', resourceId: 'known-res' }]),
         }),
       }),
     } as never);
 
-    const req = await makeNextRequest('/api/webhooks/google-calendar', {
+    const req = await makeNextRequest('/api/webhooks/google-calendar-v2', {
       method: 'POST',
       headers: {
-        'x-goog-channel-id': 'old-chan',
-        'x-goog-resource-id': 'old-res',
+        'x-goog-channel-id': 'known-chan',
+        'x-goog-resource-id': 'known-res',
         'x-goog-resource-state': 'exists',
       },
     });
-    const res = await POST(req);
-    const body = await res.json();
-    expect(res.status).toBe(200);
-    expect(body).toMatchObject({ ok: true, ignored: true });
-    expect(googleMod.stopCalendarWatch).not.toHaveBeenCalled();
-    expect(syncMod.stampLegacyWebhookReceived).toHaveBeenCalledTimes(1);
-  });
-
-  it('does NOT stop unknown channel when no stored watch exists', async () => {
-    const googleMod = await import('@/lib/google');
-    vi.mocked(googleMod.stopCalendarWatch).mockClear();
-
-    const req = await makeNextRequest('/api/webhooks/google-calendar', {
-      method: 'POST',
-      headers: {
-        'x-goog-channel-id': 'mystery-chan',
-        'x-goog-resource-id': 'mystery-res',
-        'x-goog-resource-state': 'exists',
-      },
-    });
-    const res = await POST(req);
-    const body = await res.json();
-    expect(res.status).toBe(200);
-    expect(body).toMatchObject({ ok: true, ignored: true });
-    expect(googleMod.stopCalendarWatch).not.toHaveBeenCalled();
-  });
-
-  it('records legacy noise even when a stored watch exists', async () => {
-    const syncMod = await import('@/lib/google-calendar-sync');
-    const googleMod = await import('@/lib/google');
-    const dbMod = await import('@/lib/db');
-
-    vi.mocked(googleMod.stopCalendarWatch).mockClear();
-    vi.mocked(syncMod.stampLegacyWebhookReceived).mockClear();
-
-    vi.mocked(dbMod.db.select).mockReturnValueOnce({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([{ channelId: 'active-chan', resourceId: 'active-res' }]),
-        }),
-      }),
-    } as never);
-
-    const req = await makeNextRequest('/api/webhooks/google-calendar', {
-      method: 'POST',
-      headers: {
-        'x-goog-channel-id': 'other-chan',
-        'x-goog-resource-id': 'other-res',
-        'x-goog-resource-state': 'exists',
-      },
-    });
-    const res = await POST(req);
-    const body = await res.json();
-    expect(res.status).toBe(200);
-    expect(body).toMatchObject({ ok: true, ignored: true });
-    expect(googleMod.stopCalendarWatch).not.toHaveBeenCalled();
-    expect(syncMod.stampLegacyWebhookReceived).toHaveBeenCalledTimes(1);
+    await POST(req);
+    expect(syncMod.stampWebhookReceived).toHaveBeenCalledTimes(1);
   });
 
   it('returns 200 with throttled:true when debounce fires', async () => {
@@ -626,7 +626,7 @@ describe('POST /api/webhooks/google-calendar', () => {
       }),
     } as never);
 
-    const req = await makeNextRequest('/api/webhooks/google-calendar', {
+    const req = await makeNextRequest('/api/webhooks/google-calendar-v2', {
       method: 'POST',
       headers: {
         'x-goog-channel-id': 'known-chan',
@@ -639,6 +639,33 @@ describe('POST /api/webhooks/google-calendar', () => {
     const body = await res.json();
     expect(body.throttled).toBe(true);
     expect(syncMod.runGoogleCalendarSync).not.toHaveBeenCalled();
+  });
+
+  it('runs sync for trusted channel with exists state', async () => {
+    const syncMod = await import('@/lib/google-calendar-sync');
+    vi.mocked(syncMod.runGoogleCalendarSync).mockClear();
+    vi.mocked(syncMod.shouldThrottleWebhookSync).mockResolvedValueOnce(false);
+
+    const dbMod = await import('@/lib/db');
+    vi.mocked(dbMod.db.select).mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([{ channelId: 'known-chan', resourceId: 'known-res' }]),
+        }),
+      }),
+    } as never);
+
+    const req = await makeNextRequest('/api/webhooks/google-calendar-v2', {
+      method: 'POST',
+      headers: {
+        'x-goog-channel-id': 'known-chan',
+        'x-goog-resource-id': 'known-res',
+        'x-goog-resource-state': 'exists',
+      },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    expect(syncMod.runGoogleCalendarSync).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -38,7 +38,7 @@ Track daily work hours from a single **Google Calendar** (your Work calendar). T
 
 ## Real-time updates
 
-- When you sync or select your work calendar, the app creates a **watch** on that calendar. Google sends a POST to `/api/webhooks/google-calendar` when events change; the app then syncs and recomputes daily totals.
+- When you sync or select your work calendar, the app creates a **watch** on that calendar. Google sends a POST to `/api/webhooks/google-calendar-v2` when events change; the app then syncs and recomputes daily totals. The old `/api/webhooks/google-calendar` path is kept as a legacy sink that acknowledges but ignores traffic from stale watch channels.
 - Watches expire after about 7 days. A daily cron job (`/api/cron/sync`) renews the watch and runs a sync. Configure the cron in `vercel.json` and set `CRON_SECRET` in the Vercel dashboard.
 
 ## GitHub and Vercel

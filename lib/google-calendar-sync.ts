@@ -377,7 +377,7 @@ export async function ensureCalendarWatch(): Promise<{
     console.warn('[watch] Not created: APP_URL and VERCEL_URL are both unset.');
     return { ok: false, error: 'APP_URL or VERCEL_URL not set; cannot create watch.' };
   }
-  const address = `${base}/api/webhooks/google-calendar`;
+  const address = `${base}/api/webhooks/google-calendar-v2`;
   if (base.includes('localhost')) {
     console.warn('[watch] base URL contains localhost — Google cannot reach this.');
   }
@@ -441,11 +441,17 @@ export async function ensureCalendarWatch(): Promise<{
   }
 }
 
+export function getWebhookEndpoint(): string {
+  const base = getWebhookBaseUrl();
+  return base ? `${base}/api/webhooks/google-calendar-v2` : '';
+}
+
 export async function getWatchStatus(): Promise<{
   status: 'active' | 'expiring_soon' | 'expired' | 'missing';
   expiration?: string;
   channelId?: string;
   resourceId?: string;
+  webhookEndpoint?: string;
   lastWebhookAt?: string | null;
   lastLegacyWebhookAt?: string | null;
 }> {
@@ -456,7 +462,8 @@ export async function getWatchStatus(): Promise<{
     .limit(1);
   const lastWebhookAt = await getLastWebhookReceivedAt();
   const lastLegacyWebhookAt = await getLastLegacyWebhookReceivedAt();
-  if (rows.length === 0) return { status: 'missing', lastWebhookAt, lastLegacyWebhookAt };
+  const webhookEndpoint = getWebhookEndpoint();
+  if (rows.length === 0) return { status: 'missing', webhookEndpoint, lastWebhookAt, lastLegacyWebhookAt };
   const row = rows[0];
   const exp = new Date(row.expiration);
   const now = Date.now();
@@ -464,6 +471,7 @@ export async function getWatchStatus(): Promise<{
     expiration: exp.toISOString(),
     channelId: row.channelId,
     resourceId: row.resourceId,
+    webhookEndpoint,
     lastWebhookAt,
     lastLegacyWebhookAt,
   };
