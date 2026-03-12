@@ -1,0 +1,28 @@
+---
+description: Link this project to the global cross-project playbook
+alwaysApply: true
+---
+
+# Global Playbook Link
+
+This project follows shared guidance in `C:\dev\cursor-playbook`.
+
+## Use global playbook for
+
+- architecture and reliability patterns
+- testing strategy and TDD decisions
+- deployment and operations heuristics
+- AI collaboration and rule-maintenance practices
+
+## Keep local vs global boundaries clear
+
+- Put repository-specific conventions, paths, and env details in this repo's `.cursor/rules`.
+- Put lessons reusable across projects in `C:\dev\cursor-playbook`.
+
+## Contribution loop
+
+After meaningful work, evaluate whether learnings should update:
+
+1. `C:\dev\cursor-playbook`
+2. current repo rules
+3. `C:\dev\project-template` (if reusable)

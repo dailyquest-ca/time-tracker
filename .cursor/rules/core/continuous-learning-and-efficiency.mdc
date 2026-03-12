@@ -1,0 +1,32 @@
+---
+description: Proactive rule maintenance and efficient high-signal workflows
+alwaysApply: true
+---
+
+# Continuous Learning and Efficiency
+
+## Default maintenance behavior
+
+After meaningful tasks, proactively evaluate updates for:
+
+1. `C:\dev\cursor-playbook`
+2. this repo's `.cursor/rules`
+3. `C:\dev\project-template/.cursor/rules` when reusable
+
+## Proposal-first rule updates
+
+Before editing rules, communicate:
+
+- what will be changed
+- why it is needed
+- where (playbook, local rules, template)
+
+Then apply changes.
+
+## Efficiency without quality loss
+
+- Prefer focused reads/searches over broad scans.
+- Reuse known context instead of re-reading unchanged files.
+- Validate changed files first, then expand checks if needed.
+- Keep always-on rules concise and concrete.
+- Never sacrifice correctness, tests, or clarity for speed/token savings.

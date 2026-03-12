@@ -1,14 +1,34 @@
 ---
-description: Project context — stack, entrypoints, and conventions (fill per repo)
+description: Time Tracker context, entrypoints, and integration conventions
 alwaysApply: true
 ---
 
 # Project Context
 
-**This repo:** Brief description — e.g. Next.js app with serverless API and Postgres. Fill per repo.
+**This repo:** `time-tracker` is a Next.js App Router app that syncs one selected Google Calendar into Postgres-backed time entries, category totals, and overtime notes.
 
-**Stack:** Infer from existing config (next.config, package.json). Use the repo's package manager (pnpm/npm/yarn) and lockfile; do not switch mid-project.
+**Stack:**
+- Next.js 15 + React 19 + TypeScript
+- Drizzle ORM + Postgres (`DATABASE_URL`)
+- Vercel hosting + Vercel Cron endpoint (`/api/cron/sync`)
+- Google Calendar OAuth + push watch (`events.watch`)
+- Vitest for tests (`npm test`)
+- Package manager: npm (`package-lock.json` is source of truth)
 
-**Key locations:** List main entrypoints — e.g. lib/ for shared logic, app/api/ for routes, schema and DB client paths. Add or remove as needed for this project.
+**Key locations:**
+- `lib/google-calendar-sync.ts`: sync orchestration, watch lifecycle, debounce, webhook diagnostics
+- `lib/google.ts`: Google Calendar API wrappers (`events`, `watch`, `channels.stop`)
+- `lib/db.ts` and `lib/schema.ts`: DB client + schema
+- `app/api/webhooks/google-calendar-v2/route.ts`: active trusted webhook handler
+- `app/api/webhooks/google-calendar/route.ts`: legacy sink for stale channel noise
+- `app/api/sync/watch-status/route.ts`: watch diagnostics + force-recreate endpoint
+- `lib/__tests__/api-validation.test.ts` and `lib/__tests__/sync-helpers.test.ts`: API and sync regression tests
 
-**Conventions:** Note any project-specific norms — e.g. single-tenant vs multi-tenant, how cron or webhook auth is done, naming for env vars. Keep this short; detailed patterns live in other rules.
+**Conventions:**
+- Single-user default identity (`userId = 'default'`) unless an explicit migration introduces multi-user support.
+- Use `DATABASE_URL` only (do not introduce `POSTGRES_URL` fallback logic in app code).
+- Treat Google webhook traffic as two streams:
+  - trusted current watch traffic on `/api/webhooks/google-calendar-v2`
+  - legacy/untrusted traffic on `/api/webhooks/google-calendar` (always ACK, never sync)
+- `channels.stop` failures like `403`/`404` are recoverable in lifecycle operations; do not block creating a replacement watch.
+- Keep sync operations idempotent and safe to retry.
