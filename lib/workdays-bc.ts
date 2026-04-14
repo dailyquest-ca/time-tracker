@@ -1,5 +1,5 @@
 /**
- * BC work days: Monday-Friday excluding BC statutory holidays (WorkSafeBC / BC Employment Standards).
+ * BC work days: Monday-Friday excluding WorkSafeBC-recognized holidays.
  * Fixed-date holidays use observed-day rules: if the actual date falls on Saturday,
  * the observed holiday is the preceding Friday; if Sunday, the following Monday.
  */
@@ -53,6 +53,11 @@ function bcStatutoryHolidays(year: number): string[] {
   const gf = new Date(easter);
   gf.setUTCDate(easter.getUTCDate() - 2);
   dates.push(gf.toISOString().slice(0, 10));
+
+  // Easter Monday (WorkSafeBC holiday)
+  const em = new Date(easter);
+  em.setUTCDate(easter.getUTCDate() + 1);
+  dates.push(em.toISOString().slice(0, 10));
 
   // Victoria Day - last Monday on or before May 24 (always a Monday)
   const may24 = new Date(Date.UTC(year, 4, 24, 12, 0, 0));

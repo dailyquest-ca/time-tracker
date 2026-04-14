@@ -31,6 +31,10 @@ describe('isBCWorkDay', () => {
     expect(isBCWorkDay('2026-04-03')).toBe(false);
   });
 
+  it('returns false for Easter Monday 2026 (Apr 6)', () => {
+    expect(isBCWorkDay('2026-04-06')).toBe(false);
+  });
+
   it('returns false for Victoria Day 2026 (May 18)', () => {
     expect(isBCWorkDay('2026-05-18')).toBe(false);
   });
