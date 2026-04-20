@@ -30,6 +30,8 @@ interface DayTask {
   projectName: string;
   durationMinutes: number;
   source: string;
+  /** ISO start time from Google sync; null for manual or legacy rows */
+  startTime?: string | null;
 }
 
 interface DayDetail {

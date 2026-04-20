@@ -57,6 +57,7 @@ export async function GET(request: NextRequest) {
         categoryName: categories.name,
         lengthHours: events.lengthHours,
         sourceType: events.sourceType,
+        startTime: events.startTime,
       })
       .from(events)
       .innerJoin(categories, eq(events.categoryId, categories.id))
@@ -80,6 +81,8 @@ export async function GET(request: NextRequest) {
         const cat = e.categoryName ?? '';
         byCategory[cat] = (byCategory[cat] ?? 0) + durationMinutes;
         totalMinutes += durationMinutes;
+        const startTime =
+          e.startTime != null ? new Date(e.startTime).toISOString() : null;
         return {
           id: e.id,
           taskTitle: e.name ?? e.categoryName,
@@ -87,9 +90,17 @@ export async function GET(request: NextRequest) {
           projectName: null as string | null,
           durationMinutes,
           source: e.sourceType === 'google' ? 'google_calendar' : 'manual',
+          startTime,
         };
       })
-      .sort((a, b) => b.durationMinutes - a.durationMinutes);
+      .sort((a, b) => {
+        if (a.startTime == null && b.startTime == null) return a.id - b.id;
+        if (a.startTime == null) return 1;
+        if (b.startTime == null) return -1;
+        const cmp =
+          new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+        return cmp !== 0 ? cmp : a.id - b.id;
+      });
 
     const hasOT =
       (isBCWorkDay(date) && totalMinutes > 480) ||
