@@ -58,7 +58,9 @@ export function isAllDayEvent(event: GoogleCalendarEvent): boolean {
 
 export function eventDateKey(event: GoogleCalendarEvent): string {
   if (event.start.dateTime) {
-    return new Date(event.start.dateTime).toISOString().slice(0, 10);
+    return new Date(event.start.dateTime).toLocaleDateString('en-CA', {
+      timeZone: 'America/Vancouver',
+    });
   }
   return event.start.date!;
 }

@@ -86,6 +86,28 @@ describe('eventDateKey', () => {
       end: { date: '2026-03-11' },
     }))).toBe('2026-03-10');
   });
+
+  it('keeps evening events on the same Pacific day (PST)', () => {
+    expect(eventDateKey(makeEvent({
+      start: { dateTime: '2026-01-15T17:30:00-08:00' },
+      end: { dateTime: '2026-01-15T18:30:00-08:00' },
+    }))).toBe('2026-01-15');
+  });
+
+  it('keeps evening events on the same Pacific day (PDT)', () => {
+    expect(eventDateKey(makeEvent({
+      start: { dateTime: '2026-07-15T17:30:00-07:00' },
+      end: { dateTime: '2026-07-15T18:30:00-07:00' },
+    }))).toBe('2026-07-15');
+  });
+
+  it('handles UTC dateTime strings near the Pacific midnight boundary', () => {
+    // 03:00 UTC on Mar 6 = 19:00 PST on Mar 5
+    expect(eventDateKey(makeEvent({
+      start: { dateTime: '2026-03-06T03:00:00Z' },
+      end: { dateTime: '2026-03-06T04:00:00Z' },
+    }))).toBe('2026-03-05');
+  });
 });
 
 describe('eventDurationMinutes', () => {

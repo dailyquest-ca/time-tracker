@@ -1,3 +1,10 @@
+export const LOCAL_TIMEZONE = 'America/Vancouver';
+
+/** YYYY-MM-DD for the given instant (default: now) in the app's local timezone. */
+export function localDateKey(date: Date = new Date()): string {
+  return date.toLocaleDateString('en-CA', { timeZone: LOCAL_TIMEZONE });
+}
+
 /** Parse numeric(6,2) string from DB to number, handling null/string. */
 export function parseHours(val: string | number | null | undefined): number {
   if (val == null) return 0;
@@ -38,10 +45,12 @@ export function getPageRange(
   page: number,
   pageSize: number,
 ): { from: string; to: string } {
-  const to = new Date();
-  to.setDate(to.getDate() - page * pageSize);
+  const todayKey = localDateKey();
+  const [y, m, d] = todayKey.split('-').map(Number);
+  const to = new Date(Date.UTC(y, m - 1, d));
+  to.setUTCDate(to.getUTCDate() - page * pageSize);
   const from = new Date(to);
-  from.setDate(to.getDate() - pageSize + 1);
+  from.setUTCDate(to.getUTCDate() - pageSize + 1);
   return {
     from: from.toISOString().slice(0, 10),
     to: to.toISOString().slice(0, 10),

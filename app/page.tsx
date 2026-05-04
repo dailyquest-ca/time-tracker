@@ -10,6 +10,7 @@ import {
   getYearRange,
   getPayPeriods,
   sumByCategory,
+  localDateKey,
 } from '@/lib/format';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -300,7 +301,7 @@ export default function HomePage() {
               </thead>
               <tbody>
                 {[...dataWithDelta].reverse().map((row) => {
-                  const today = new Date().toISOString().slice(0, 10);
+                  const today = localDateKey();
                   const isToday = row.date === today;
                   const notWorkDay = !row.isWorkDay;
                   const { shown, extra } = topCategories(row.minutesByCategory ?? {}, 2);

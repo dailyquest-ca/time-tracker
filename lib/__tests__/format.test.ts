@@ -7,6 +7,7 @@ import {
   getPayPeriods,
   sumByCategory,
   parseHours,
+  localDateKey,
 } from '../format';
 
 describe('fmtHours', () => {
@@ -110,6 +111,23 @@ describe('sumByCategory', () => {
 
   it('returns empty for empty input', () => {
     expect(sumByCategory([])).toEqual({});
+  });
+});
+
+describe('localDateKey', () => {
+  it('returns the Pacific calendar date for an evening Pacific instant (PST)', () => {
+    // 2026-01-15 17:30 PST = 2026-01-16 01:30 UTC
+    expect(localDateKey(new Date('2026-01-16T01:30:00Z'))).toBe('2026-01-15');
+  });
+
+  it('returns the Pacific calendar date for an evening Pacific instant (PDT)', () => {
+    // 2026-07-15 17:30 PDT = 2026-07-16 00:30 UTC
+    expect(localDateKey(new Date('2026-07-16T00:30:00Z'))).toBe('2026-07-15');
+  });
+
+  it('returns the next Pacific day after Pacific midnight', () => {
+    // 2026-03-06 01:00 PST = 2026-03-06 09:00 UTC
+    expect(localDateKey(new Date('2026-03-06T09:00:00Z'))).toBe('2026-03-06');
   });
 });
 
