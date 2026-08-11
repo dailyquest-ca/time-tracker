@@ -105,6 +105,40 @@ export function todayInVancouver(now: Date = new Date()): string {
 }
 
 /**
+ * TickTick issues no refresh token, so an expiring access token is a manual fix
+ * (re-run the spike, re-seed). Warn this far ahead so it never expires silently.
+ */
+export const TOKEN_EXPIRY_WARNING_DAYS = 14;
+
+export type TokenExpiryState = 'unknown' | 'valid' | 'expiring_soon' | 'expired';
+
+export interface TokenExpiry {
+  state: TokenExpiryState;
+  /** Whole days until expiry; negative once past. Null when unknown. */
+  daysRemaining: number | null;
+}
+
+/** How much life the stored access token has left. */
+export function tokenExpiryStatus(
+  expiresAt: Date | string | null | undefined,
+  now: Date = new Date(),
+): TokenExpiry {
+  if (expiresAt == null) return { state: 'unknown', daysRemaining: null };
+
+  const expiry = expiresAt instanceof Date ? expiresAt : new Date(expiresAt);
+  if (isNaN(expiry.getTime())) return { state: 'unknown', daysRemaining: null };
+
+  const msRemaining = expiry.getTime() - now.getTime();
+  const daysRemaining = Math.floor(msRemaining / (24 * 60 * 60 * 1000));
+
+  if (msRemaining <= 0) return { state: 'expired', daysRemaining };
+  if (daysRemaining <= TOKEN_EXPIRY_WARNING_DAYS) {
+    return { state: 'expiring_soon', daysRemaining };
+  }
+  return { state: 'valid', daysRemaining };
+}
+
+/**
  * Lists in a given TickTick folder that can hold trackable time.
  *
  * Selection is by folder membership rather than a hardcoded id table, so a list

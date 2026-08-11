@@ -91,6 +91,17 @@ class FileAuthProvider implements OAuthClientProvider {
   }
 
   clientInformation(): OAuthClientInformationMixed | undefined {
+    // A manually registered TickTick app (developer portal) takes precedence over
+    // dynamic registration. Dynamically registered clients are not issued refresh
+    // tokens; a registered app historically was — see lib/ticktick.ts at abb6f44.
+    const staticId = process.env.TICKTICK_CLIENT_ID?.trim();
+    const staticSecret = process.env.TICKTICK_CLIENT_SECRET?.trim();
+    if (staticId) {
+      return {
+        client_id: staticId,
+        ...(staticSecret ? { client_secret: staticSecret } : {}),
+      } as OAuthClientInformationMixed;
+    }
     return readStore().clientInformation;
   }
 
@@ -232,15 +243,44 @@ async function main(): Promise<void> {
   }
 
   const stored = readStore().tokens;
+  const expiresIn = stored?.expires_in;
+  const usedStaticClient = Boolean(process.env.TICKTICK_CLIENT_ID?.trim());
+
   console.log('\n────────────── Phase 0 result ──────────────');
+  console.log(`client registration  : ${usedStaticClient ? 'static (developer portal)' : 'dynamic'}`);
   console.log(`refresh_token issued : ${stored?.refresh_token ? 'YES' : 'NO'}`);
-  console.log(`token expires_in     : ${stored?.expires_in ?? 'not reported'}`);
+  console.log(
+    `token expires_in     : ${
+      expiresIn != null
+        ? `${expiresIn}s (~${(expiresIn / 86400).toFixed(1)} days, until ${new Date(
+            Date.now() + expiresIn * 1000,
+          ).toISOString()})`
+        : 'not reported'
+    }`,
+  );
   if (HEADLESS) {
     console.log('headless run         : PASSED — no browser was required.');
-    console.log('\nGate PASSED. Safe to build the sync route.');
-  } else {
+  }
+
+  if (!stored?.refresh_token) {
+    console.log(
+      '\nWARNING: no refresh token. A headless pass only proves the *current*\n' +
+        'access token still works — the sync will stop when it expires and only a\n' +
+        'human can renew it.',
+    );
+    if (!usedStaticClient) {
+      console.log(
+        '\nWorth trying: register an app in the TickTick developer portal and re-run\n' +
+          'with TICKTICK_CLIENT_ID / TICKTICK_CLIENT_SECRET set. Statically registered\n' +
+          'clients have historically been issued refresh tokens where dynamically\n' +
+          'registered ones are not.',
+      );
+    }
+  }
+
+  if (!HEADLESS) {
     console.log('\nNow run the headless proof:');
-    console.log('  npx tsx scripts/ticktick-mcp-spike.ts --headless');
+    console.log('  npm run ticktick:spike -- --headless');
   }
 
   await client.close();

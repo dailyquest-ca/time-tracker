@@ -126,6 +126,31 @@ had `source_type` / `source_id` / `source_group` with a unique constraint on
 Each run reconciles `[now − LOOKBACK_DAYS, now + 2 days]`, clamped to the cutover
 date. Rows outside that window are frozen history and are never deleted.
 
+## Known limitation: no refresh token
+
+The Phase 0 spike confirmed TickTick issues **no refresh token** to a
+dynamically registered client. Consequences:
+
+- A headless run only proves the *current* access token still works. It does not
+  prove the sync survives expiry.
+- When the access token expires, the sync stops and **only a human can restart
+  it**. There is no unattended recovery.
+
+Mitigations in place:
+
+- Every run reports `tokenState` and `tokenExpiresInDays`. The workflow raises a
+  GitHub `::warning::` once inside the 14-day window, so the deadline is visible
+  in the Actions tab before it bites.
+- An expired token fails with `TickTickNotConnectedError` naming the fix, rather
+  than an opaque 401.
+
+**Worth trying:** register an app in the TickTick developer portal and re-run the
+spike with `TICKTICK_CLIENT_ID` / `TICKTICK_CLIENT_SECRET` set. The spike prefers
+static credentials over dynamic registration when they are present. Statically
+registered clients have historically been issued refresh tokens (see
+`refreshAccessToken` in `lib/ticktick.ts` at commit `abb6f44`), so this may remove
+the limitation entirely.
+
 ## Re-authorizing
 
 The sync route cannot open a browser. If the refresh token stops working it fails

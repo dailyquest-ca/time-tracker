@@ -5,6 +5,7 @@ import {
   listNameToCategory,
   selectIngestableItems,
   selectFolderLists,
+  tokenExpiryStatus,
   taskDateKey,
   taskDurationMinutes,
   ticktickSourceId,
@@ -365,5 +366,55 @@ describe('selectFolderLists', () => {
 
   it('returns an empty array when the folder has no lists', () => {
     expect(selectFolderLists([project({ groupId: PERSONAL })], WSBC)).toEqual([]);
+  });
+});
+
+describe('tokenExpiryStatus', () => {
+  const now = new Date('2026-08-10T12:00:00Z');
+  const inDays = (n: number) =>
+    new Date(now.getTime() + n * 24 * 60 * 60 * 1000);
+
+  it('reports unknown when no expiry was recorded', () => {
+    expect(tokenExpiryStatus(null, now)).toEqual({
+      state: 'unknown',
+      daysRemaining: null,
+    });
+  });
+
+  it('reports valid when the token has plenty of life left', () => {
+    expect(tokenExpiryStatus(inDays(90), now).state).toBe('valid');
+  });
+
+  it('reports days remaining', () => {
+    expect(tokenExpiryStatus(inDays(90), now).daysRemaining).toBe(90);
+  });
+
+  it('warns when expiry is inside the warning window', () => {
+    // No refresh token exists, so expiry needs advance notice — it is a manual fix.
+    expect(tokenExpiryStatus(inDays(10), now).state).toBe('expiring_soon');
+  });
+
+  it('treats the warning boundary as expiring soon', () => {
+    expect(tokenExpiryStatus(inDays(14), now).state).toBe('expiring_soon');
+  });
+
+  it('treats one day past the boundary as valid', () => {
+    expect(tokenExpiryStatus(inDays(15), now).state).toBe('valid');
+  });
+
+  it('reports expired once the moment has passed', () => {
+    expect(tokenExpiryStatus(inDays(-1), now).state).toBe('expired');
+  });
+
+  it('reports a non-positive days remaining when expired', () => {
+    expect(tokenExpiryStatus(inDays(-3), now).daysRemaining).toBeLessThanOrEqual(0);
+  });
+
+  it('accepts an ISO string as well as a Date', () => {
+    expect(tokenExpiryStatus(inDays(30).toISOString(), now).state).toBe('valid');
+  });
+
+  it('reports unknown for an unparseable value', () => {
+    expect(tokenExpiryStatus('not-a-date', now).state).toBe('unknown');
   });
 });

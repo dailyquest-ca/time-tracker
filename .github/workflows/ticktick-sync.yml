@@ -42,6 +42,14 @@ jobs:
             exit 1
           fi
 
+          # TickTick issues no refresh token, so the access token eventually dies
+          # and only a human can renew it. Surface the countdown loudly.
+          token_state=$(grep -o '"tokenState":"[^"]*"' response.json | cut -d'"' -f4 || true)
+          days=$(grep -o '"tokenExpiresInDays":[-0-9]*' response.json | cut -d: -f2 || true)
+          if [ "$token_state" = "expiring_soon" ]; then
+            echo "::warning::TickTick access token expires in ${days} day(s). Run: npm run ticktick:spike && npm run ticktick:seed"
+          fi
+
   # GitHub disables scheduled workflows after 60 days without repo activity.
   keepalive:
     if: github.event_name == 'schedule'

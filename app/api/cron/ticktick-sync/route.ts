@@ -38,6 +38,12 @@ async function handle(request: NextRequest) {
     }`,
   );
 
+  if (result.tokenState === 'expiring_soon') {
+    console.warn(
+      `[cron/ticktick-sync] TickTick token expires in ${result.tokenExpiresInDays} day(s) — re-auth needed, there is no refresh token.`,
+    );
+  }
+
   return NextResponse.json(
     { ...result, elapsedMs: elapsed },
     { status: result.ok ? 200 : 500 },

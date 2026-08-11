@@ -21,7 +21,12 @@ import type {
 import { eq } from 'drizzle-orm';
 import { db } from './db';
 import { integrationTokens } from './schema';
-import type { TickTickProject, TickTickTask } from './ticktick';
+import {
+  tokenExpiryStatus,
+  type TickTickProject,
+  type TickTickTask,
+  type TokenExpiry,
+} from './ticktick';
 
 const PROVIDER = 'ticktick';
 const DEFAULT_MCP_URL = 'https://mcp.ticktick.com';
@@ -136,19 +141,41 @@ function parseToolResult<T>(result: unknown): T {
   return parsed as T;
 }
 
+const REAUTH_HINT =
+  'Re-authorize locally: npm run ticktick:spike && npm run ticktick:seed';
+
 /** A connected TickTick MCP session. Always `close()` when finished. */
 export class TickTickClient {
-  private constructor(private readonly client: Client) {}
+  private constructor(
+    private readonly client: Client,
+    /** Life left on the stored access token at connect time. */
+    readonly tokenExpiry: TokenExpiry,
+  ) {}
 
   static async connect(): Promise<TickTickClient> {
     const rows = await db
-      .select({ provider: integrationTokens.provider })
+      .select()
       .from(integrationTokens)
       .where(eq(integrationTokens.provider, PROVIDER))
       .limit(1);
     if (rows.length === 0) {
       throw new TickTickNotConnectedError(
-        'No TickTick credentials stored. Seed integration_tokens from the spike output.',
+        `No TickTick credentials stored. ${REAUTH_HINT}`,
+      );
+    }
+
+    // TickTick issues no refresh token, so an expired access token cannot be
+    // renewed here. Say so plainly rather than surfacing an opaque 401.
+    const expiry = tokenExpiryStatus(rows[0].expiresAt, new Date());
+    if (expiry.state === 'expired') {
+      throw new TickTickNotConnectedError(
+        `TickTick access token expired ${Math.abs(expiry.daysRemaining ?? 0)} day(s) ago ` +
+          `and cannot be refreshed automatically. ${REAUTH_HINT}`,
+      );
+    }
+    if (expiry.state === 'expiring_soon') {
+      console.warn(
+        `[ticktick] Access token expires in ${expiry.daysRemaining} day(s) and has no refresh token. ${REAUTH_HINT}`,
       );
     }
 
@@ -160,7 +187,7 @@ export class TickTickClient {
       authProvider: new DbAuthProvider(),
     });
     await client.connect(transport);
-    return new TickTickClient(client);
+    return new TickTickClient(client, expiry);
   }
 
   async listProjects(): Promise<TickTickProject[]> {

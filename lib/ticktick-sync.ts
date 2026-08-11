@@ -44,6 +44,12 @@ export interface TickTickSyncResult {
   deleted?: number;
   datesRecomputed?: number;
   lists?: number;
+  /**
+   * Life left on the TickTick access token. Reported on every run because there
+   * is no refresh token — expiry is a manual fix and must not arrive unnoticed.
+   */
+  tokenState?: string;
+  tokenExpiresInDays?: number | null;
 }
 
 function lookbackDays(): number {
@@ -143,7 +149,17 @@ export async function runTickTickSync(): Promise<TickTickSyncResult> {
       console.warn(
         `[ticktick-sync] No task lists found in folder ${WSBC_FOLDER_ID}; nothing to sync.`,
       );
-      return { ok: true, lists: 0, fetched: 0, inserted: 0, updated: 0, skipped: 0, deleted: 0 };
+      return {
+        ok: true,
+        lists: 0,
+        fetched: 0,
+        inserted: 0,
+        updated: 0,
+        skipped: 0,
+        deleted: 0,
+        tokenState: client.tokenExpiry.state,
+        tokenExpiresInDays: client.tokenExpiry.daysRemaining,
+      };
     }
 
     const now = new Date();
@@ -299,6 +315,8 @@ export async function runTickTickSync(): Promise<TickTickSyncResult> {
       skipped,
       deleted,
       datesRecomputed: dates.length,
+      tokenState: client.tokenExpiry.state,
+      tokenExpiresInDays: client.tokenExpiry.daysRemaining,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
