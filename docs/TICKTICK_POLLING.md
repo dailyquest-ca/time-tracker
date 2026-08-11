@@ -1,92 +1,113 @@
-# TickTick polling
+# TickTick → time tracker sync
 
-How scheduled work in the **WSBC** TickTick folder gets into the time tracker.
+Status: **Phase 0 (gate) — not yet built.** The sync route, migration and workflow
+below are the agreed design; none of it ships until the OAuth spike passes.
 
-## Why the poller is a Claude session, not a Vercel cron
+## Design
 
-TickTick is read through the **TickTick MCP connector**. That connector is
-OAuth-bound to the owner's Claude account (`isAuthless: false`) — it is reachable
-from a Claude session, but there is no credential this app could hold to call it
-from Vercel. The app therefore never talks to TickTick directly. A scheduled
-Claude session does the reading and pushes batches in:
+TickTick becomes a second, additive source of time entries. The Google Calendar
+pipeline is untouched and keeps running in parallel.
 
 ```
-Claude session (scheduled)
-  → TickTick MCP: list_projects  → lists whose groupId is the WSBC folder
-  → TickTick MCP: filter_tasks   → tasks in those lists, today onward
-  → POST /api/ingest/ticktick    → upsert into events, recompute daily totals
+GitHub Action (*/10)  →  GET /api/cron/ticktick-sync  (Bearer CRON_SECRET)
+                              │
+                              └─ MCP client → https://mcp.ticktick.com
+                                 (JSON-RPC 2.0 over Streamable HTTP, no LLM)
+                              └─ upsert events, recompute daily totals
 ```
 
-## IDs
+TickTick has no webhooks, so this polls. Vercel Hobby cron is daily-only, hence
+the GitHub Action — the repo is public, so Actions minutes are free. Total cost
+of the schedule: $0.
+
+**A time entry from TickTick** = a task with both a start and a due time.
+Duration is `due − start`. All-day and undated tasks are excluded, matching the
+existing hour-log convention and how the calendar sync skips all-day events.
+
+## Which lists are synced
+
+Lists are resolved by **folder membership**, not by a hardcoded id table:
+every list whose `groupId` is the WSBC folder is in scope, so lists added to the
+folder later are picked up with no code change.
 
 | Thing | ID |
 |---|---|
 | WSBC folder (project group) | `6a7a7032e42bdd11f74ff016` |
-| `🤖ELAN` list | `6a7a6ff28f08f1b21296dc98` |
+| `🤖ELAN` list (only member as of 2026-08-10) | `6a7a6ff28f08f1b21296dc98` |
 
-Resolve lists by **folder id**, not by a hardcoded list id — new lists added to
-the WSBC folder are then picked up automatically.
+The category is the list name with its leading emoji stripped, so `🤖ELAN` files
+under the existing `ELAN` category. This matters because task titles often carry
+no acronym — "Wrapping up Product Planning tasks" would otherwise land in
+"General tasks/meetings". `lib/ticktick.ts` holds these rules.
 
-## Setup
+## Phase 0 — headless OAuth spike (GATE)
 
-1. Generate a secret and set it in Vercel as `INGEST_SECRET`:
-   ```bash
-   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-   ```
-2. Deploy, so `/api/ingest/ticktick` is live.
-3. Schedule the poller with the prompt below.
-
-## Poller prompt
-
-Use this as the scheduled prompt. It is written to be standalone — each firing
-starts from nothing.
-
-> Sync the WSBC TickTick folder into the time tracker.
->
-> 1. Call the TickTick MCP `list_projects`. Keep every list whose `groupId` is
->    `6a7a7032e42bdd11f74ff016` (the WSBC folder) and whose `kind` is `TASK`.
-> 2. For those list ids, call `filter_tasks` with `projectIds` set to them and
->    `startDate` set to 00:00 today in America/Vancouver. Also call
->    `list_completed_tasks_by_date` for the same ids and date range, so completed
->    work is included.
-> 3. POST the result to `https://<your-app>/api/ingest/ticktick` with header
->    `Authorization: Bearer $INGEST_SECRET` and body:
->    ```json
->    {
->      "lists": [
->        { "id": "<listId>", "name": "<list name>", "tasks": [ ...tasks... ] }
->      ],
->      "prune": true
->    }
->    ```
->    Send the raw task objects through unchanged — the endpoint does its own
->    filtering (timed tasks only, today onward) and de-duplication.
-> 4. Report only the counts returned (`ingested`, `pruned`, `dates`). If nothing
->    changed, say nothing further.
-
-## Cadence
-
-Durable scheduled sessions run **at most hourly**. A 10-minute loop is only
-possible inside a live session, which ends when the session does. Practical
-options:
-
-| Option | Interval | Survives session end |
-|---|---|---|
-| Scheduled routine | hourly | yes |
-| In-session loop | 10 min | no |
-
-Hourly is the durable choice. Because the endpoint is idempotent, a missed or
-duplicated run is harmless.
-
-## Verifying
+Everything waits on this. All TickTick access so far has ridden an authenticated
+Claude connector session; this proves a standalone client can authenticate with
+no browser and no Claude involvement.
 
 ```bash
-curl -s -X POST https://<your-app>/api/ingest/ticktick \
-  -H "Authorization: Bearer $INGEST_SECRET" \
-  -H 'Content-Type: application/json' \
-  -d '{"lists":[{"id":"6a7a6ff28f08f1b21296dc98","name":"🤖ELAN","tasks":[]}]}'
+npm run ticktick:spike              # Run 1 — approve in a browser
+npm run ticktick:spike -- --headless # Run 2 — must succeed cold, no browser
 ```
 
-Expect `{"ok":true,"ingested":0,"pruned":0,"dates":[],"today":"..."}`. A 401 means
-the secret does not match; a 500 with `Server misconfigured` means `INGEST_SECRET`
-is not set on the deployment.
+**Acceptance:** Run 2 passes in a fresh process without opening a browser.
+
+**Stop conditions** — report rather than work around:
+
+- No refresh token is issued.
+- Dynamic registration is refused with no manual app-registration alternative.
+- Tokens are bound to session lifetime.
+
+Do **not** fall back to TickTick's unofficial `api/v2` endpoints without
+discussing it first.
+
+### What discovery already tells us (probed 2026-08-10)
+
+```
+/.well-known/oauth-protected-resource
+  authorization_servers : https://ticktick.com/
+  scopes_supported      : tasks:read, tasks:write
+
+/.well-known/oauth-authorization-server
+  authorization_endpoint            : https://ticktick.com/oauth/authorize
+  token_endpoint                    : https://api.ticktick.com/oauth/token
+  registration_endpoint             : https://api.ticktick.com/oauth/register
+  client_registration_types_supported: dynamic
+  grant_types_supported             : authorization_code
+  code_challenge_methods_supported  : plain, S256
+```
+
+- ✅ Dynamic client registration is offered.
+- ⚠️ `refresh_token` is **not** advertised in `grant_types_supported`. TickTick's
+  classic OAuth did honour the refresh grant (see `lib/ticktick.ts` at commit
+  `abb6f44`), and the endpoints above are that same OAuth system, so it may work
+  regardless — but this is the gate's real risk. The spike asks for the refresh
+  grant by default; if registration is rejected as invalid client metadata,
+  re-run with `TICKTICK_SPIKE_NO_REFRESH_GRANT=1` to see whether a refresh token
+  is issued anyway.
+
+## Phases after the gate
+
+1. **Migration** — only `integration_tokens` is genuinely new. `events` already
+   has `source_type` / `source_id` / `source_group` with a unique constraint on
+   `(source_type, source_id)`, so no discriminator migration is needed.
+2. **Sync route** — `app/api/cron/ticktick-sync/route.ts`, Bearer `CRON_SECRET`,
+   mirroring `app/api/cron/sync/route.ts`. Window `[now − LOOKBACK_DAYS, now + 2d]`.
+   Skip writes when the task `etag` is unchanged. Reconcile deletions inside the
+   window only. Recompute affected dates via `recomputeDailyTotalsForDates`.
+3. **GitHub Action** — `*/10`, offset off the hour, plus a keepalive job to dodge
+   the 60-day inactivity auto-disable on scheduled workflows.
+
+## Environment
+
+| Var | Where | Notes |
+|---|---|---|
+| `CRON_SECRET` | Vercel + Actions secret | reuse the existing value |
+| `TICKTICK_MCP_SERVER_URL` | Vercel | defaults to `https://mcp.ticktick.com` |
+| `TICKTICK_CUTOVER_DATE` | Vercel | entries starting earlier are ignored |
+| `TICKTICK_LOOKBACK_DAYS` | Vercel | default 7 |
+| OAuth client + tokens | `integration_tokens` table | seeded from the spike output |
+
+Vercel functions have no persistent disk, so tokens live in the database, not on
+the filesystem. The spike's `.ticktick-tokens.json` is local-only and gitignored.

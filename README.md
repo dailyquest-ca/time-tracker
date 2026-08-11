@@ -42,32 +42,33 @@ Scheduled work in the **WSBC** TickTick folder is tracked alongside calendar tim
 Each list in the folder becomes a category — the list's emoji is stripped, so
 `🤖ELAN` files under `ELAN`.
 
-TickTick is read through the **TickTick MCP connector**, which is OAuth-bound to
-the owner's Claude account. That connector is reachable from a Claude session but
-**not** from this app's server runtime, so the polling loop is a scheduled Claude
-session rather than a Vercel cron:
+> **Status: not yet live.** The design is agreed and gated on a headless OAuth
+> spike — see `docs/TICKTICK_POLLING.md`.
+
+TickTick is read from its **official MCP server** (`https://mcp.ticktick.com`)
+using a plain programmatic JSON-RPC client — no LLM is involved. TickTick has no
+webhooks, so a GitHub Action polls a cron route every ~10 minutes:
 
 ```
-Claude session (scheduled)
-  → reads the WSBC folder over the TickTick MCP
-  → POST /api/ingest/ticktick   (Authorization: Bearer $INGEST_SECRET)
-  → upserts into events, recomputes daily totals
+GitHub Action (*/10) → GET /api/cron/ticktick-sync (Bearer CRON_SECRET)
+                          → MCP client → https://mcp.ticktick.com
+                          → upsert events, recompute daily totals
 ```
+
+Vercel Hobby cron is daily-only, which is why the schedule lives in a GitHub
+Action; the repo is public, so those minutes are free.
 
 What gets tracked:
 
-- Tasks with **both a start and a due time**, dated **today or later**. All-day and
-  undated tasks are skipped, matching how all-day calendar events are skipped.
+- Tasks with **both a start and a due time**. All-day and undated tasks are
+  skipped, matching how all-day calendar events are skipped.
 - **Completed tasks are kept.** Finished work is real time spent; it stays on its day.
 - Durations count toward daily hours and overtime, the same as calendar events.
 
-Writes are idempotent — events are keyed on `(source_type, source_id)` where
-`source_id` is the TickTick task id, so re-posting a batch updates in place. Pass
-`"prune": true` to drop items dated today or later that no longer exist upstream;
-past events are never pruned.
-
-Setup: set `INGEST_SECRET` in Vercel, then schedule the poller (see
-`docs/TICKTICK_POLLING.md`).
+The Google Calendar pipeline is untouched and runs in parallel. Writes are
+additive and idempotent — events are keyed on `(source_type, source_id)` where
+`source_id` is the TickTick task id, so a re-run with no upstream change writes
+nothing.
 
 ## Real-time updates
 

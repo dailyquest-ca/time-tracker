@@ -98,8 +98,7 @@ lib/categorize.ts              Title -> category. Leading 3+ char acronym wins,
 lib/ticktick.ts                Pure helpers for TickTick items. TickTick items
                                are categorized by their *list name*, not their
                                title, so they bypass lib/categorize.ts.
-app/api/ingest/ticktick/       Ingest endpoint for TickTick batches, pushed by a
-                               scheduled Claude session. See
+scripts/ticktick-mcp-spike.ts  Phase 0 gate for the TickTick sync. See
                                docs/TICKTICK_POLLING.md.
 lib/overtime.ts                Daily totals + overtime balance.
 lib/workdays-bc.ts             BC statutory holiday / workday calendar.
@@ -117,11 +116,12 @@ lib/__tests__/                 All tests. Vitest, `@/*` aliased to repo root.
 - Google webhooks are two streams: trusted current traffic on
   `/api/webhooks/google-calendar-v2`, legacy noise on
   `/api/webhooks/google-calendar` (always ACK, never sync).
-- **TickTick is read over the MCP connector only** — there is no TickTick API
-  client in this app, and adding one is not the fix for a sync problem. The
-  connector is OAuth-bound to the owner's Claude account and unreachable from
-  Vercel, so a scheduled Claude session polls it and POSTs to
-  `/api/ingest/ticktick`. See `docs/TICKTICK_POLLING.md`.
+- **TickTick is read from its official MCP server** (`https://mcp.ticktick.com`)
+  via a programmatic JSON-RPC client — no LLM. Do **not** reach for TickTick's
+  REST Open API (it cannot return completed tasks) or its unofficial `api/v2`
+  endpoints; if MCP auth breaks, stop and report rather than falling back.
+  Lists are selected by **WSBC folder membership**, never a hardcoded id table.
+  See `docs/TICKTICK_POLLING.md`.
 
 ## Commands
 
