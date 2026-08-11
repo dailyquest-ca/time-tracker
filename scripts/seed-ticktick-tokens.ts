@@ -33,6 +33,8 @@ interface TokenFile {
     scope?: string;
     expires_in?: number;
   };
+  /** Absolute expiry stamped by the spike when the token was issued. */
+  expiresAt?: string;
 }
 
 async function main(): Promise<void> {
@@ -55,10 +57,21 @@ async function main(): Promise<void> {
     );
   }
 
-  const expiresAt =
-    typeof store.tokens?.expires_in === 'number'
-      ? new Date(Date.now() + store.tokens.expires_in * 1000)
-      : null;
+  // Prefer the absolute expiry the spike stamped at issue time. Deriving it from
+  // expires_in here would silently extend the deadline by however long passed
+  // between authorizing and seeding.
+  let expiresAt: Date | null = null;
+  if (store.expiresAt) {
+    const parsed = new Date(store.expiresAt);
+    if (!isNaN(parsed.getTime())) expiresAt = parsed;
+  }
+  if (!expiresAt && typeof store.tokens?.expires_in === 'number') {
+    expiresAt = new Date(Date.now() + store.tokens.expires_in * 1000);
+    console.warn(
+      'WARNING: token file has no stamped expiry; deriving from expires_in as of now. ' +
+        'Re-run the spike if the token was issued a while ago.',
+    );
+  }
 
   const pool = createPool({ connectionString });
   await pool.query(

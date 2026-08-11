@@ -106,9 +106,11 @@ export function todayInVancouver(now: Date = new Date()): string {
 
 /**
  * TickTick issues no refresh token, so an expiring access token is a manual fix
- * (re-run the spike, re-seed). Warn this far ahead so it never expires silently.
+ * (re-run the spike, re-seed). Tokens live ~180 days, which means this comes up
+ * about twice a year — long enough to have forgotten it exists — so warn a month
+ * out rather than a fortnight.
  */
-export const TOKEN_EXPIRY_WARNING_DAYS = 14;
+export const TOKEN_EXPIRY_WARNING_DAYS = 30;
 
 export type TokenExpiryState = 'unknown' | 'valid' | 'expiring_soon' | 'expired';
 

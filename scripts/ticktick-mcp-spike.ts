@@ -52,6 +52,11 @@ interface TokenFile {
   clientInformation?: OAuthClientInformationMixed;
   tokens?: OAuthTokens;
   codeVerifier?: string;
+  /**
+   * Absolute expiry, stamped when the token was issued. `expires_in` is relative
+   * to that moment, so seeding days later must not recompute it from "now".
+   */
+  expiresAt?: string;
 }
 
 function readStore(): TokenFile {
@@ -116,7 +121,12 @@ class FileAuthProvider implements OAuthClientProvider {
 
   saveTokens(tokens: OAuthTokens): void {
     const previous = readStore().tokens;
-    writeStore({ tokens });
+    // Stamp expiry now, while `expires_in` is still relative to this moment.
+    const expiresAt =
+      typeof tokens.expires_in === 'number'
+        ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
+        : undefined;
+    writeStore({ tokens, ...(expiresAt ? { expiresAt } : {}) });
     const fields = Object.keys(tokens).join(', ');
     console.log(`[spike] Saved tokens — fields present: ${fields}`);
     if (previous?.refresh_token && tokens.refresh_token) {

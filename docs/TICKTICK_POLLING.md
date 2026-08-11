@@ -129,18 +129,30 @@ date. Rows outside that window are frozen history and are never deleted.
 ## Known limitation: no refresh token
 
 The Phase 0 spike confirmed TickTick issues **no refresh token** to a
-dynamically registered client. Consequences:
+dynamically registered client. It does issue a long-lived access token:
+
+```
+expires_in = 15552000s = exactly 180 days
+```
+
+Consequences:
 
 - A headless run only proves the *current* access token still works. It does not
   prove the sync survives expiry.
 - When the access token expires, the sync stops and **only a human can restart
   it**. There is no unattended recovery.
+- In practice this is a **re-auth roughly twice a year**, which is a reasonable
+  operating cost — not a blocker.
 
 Mitigations in place:
 
 - Every run reports `tokenState` and `tokenExpiresInDays`. The workflow raises a
-  GitHub `::warning::` once inside the 14-day window, so the deadline is visible
-  in the Actions tab before it bites.
+  GitHub `::warning::` once inside the 30-day window. The window is a month
+  rather than a fortnight precisely because this comes up so rarely that it will
+  have been forgotten.
+- The spike stamps an absolute expiry when the token is issued, and the seed
+  script uses it. Deriving expiry from `expires_in` at seed time would silently
+  extend the deadline by however long passed between authorizing and seeding.
 - An expired token fails with `TickTickNotConnectedError` naming the fix, rather
   than an opaque 401.
 

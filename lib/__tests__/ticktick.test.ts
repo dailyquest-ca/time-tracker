@@ -6,6 +6,7 @@ import {
   selectIngestableItems,
   selectFolderLists,
   tokenExpiryStatus,
+  TOKEN_EXPIRY_WARNING_DAYS,
   taskDateKey,
   taskDurationMinutes,
   ticktickSourceId,
@@ -381,8 +382,9 @@ describe('tokenExpiryStatus', () => {
     });
   });
 
-  it('reports valid when the token has plenty of life left', () => {
-    expect(tokenExpiryStatus(inDays(90), now).state).toBe('valid');
+  it('reports valid for a freshly issued 180-day token', () => {
+    // TickTick issues expires_in = 15552000s exactly.
+    expect(tokenExpiryStatus(inDays(180), now).state).toBe('valid');
   });
 
   it('reports days remaining', () => {
@@ -395,11 +397,15 @@ describe('tokenExpiryStatus', () => {
   });
 
   it('treats the warning boundary as expiring soon', () => {
-    expect(tokenExpiryStatus(inDays(14), now).state).toBe('expiring_soon');
+    expect(tokenExpiryStatus(inDays(TOKEN_EXPIRY_WARNING_DAYS), now).state).toBe(
+      'expiring_soon',
+    );
   });
 
   it('treats one day past the boundary as valid', () => {
-    expect(tokenExpiryStatus(inDays(15), now).state).toBe('valid');
+    expect(
+      tokenExpiryStatus(inDays(TOKEN_EXPIRY_WARNING_DAYS + 1), now).state,
+    ).toBe('valid');
   });
 
   it('reports expired once the moment has passed', () => {
@@ -411,7 +417,7 @@ describe('tokenExpiryStatus', () => {
   });
 
   it('accepts an ISO string as well as a Date', () => {
-    expect(tokenExpiryStatus(inDays(30).toISOString(), now).state).toBe('valid');
+    expect(tokenExpiryStatus(inDays(180).toISOString(), now).state).toBe('valid');
   });
 
   it('reports unknown for an unparseable value', () => {
