@@ -96,3 +96,19 @@ export function sumByCategory(rows: DailyRow[]): Record<string, number> {
   }
   return totals;
 }
+
+/**
+ * Map an event's stored `sourceType` to the label the day API exposes.
+ * Unknown sources fall back to 'manual' so a new source type never leaks
+ * an unrecognised string into the UI.
+ */
+export function eventSourceLabel(sourceType: string): string {
+  switch (sourceType) {
+    case 'google':
+      return 'google_calendar';
+    case 'ticktick':
+      return 'ticktick';
+    default:
+      return 'manual';
+  }
+}

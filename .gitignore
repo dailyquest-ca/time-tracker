@@ -23,3 +23,9 @@ next-env.d.ts
 
 # drizzle (keep schema and migrations in repo; ignore generated cache if any)
 drizzle/migrations
+
+# claude code (keep shared settings + hooks; ignore per-machine permission grants)
+.claude/settings.local.json
+
+# ticktick oauth tokens from the Phase 0 spike (credential - never commit)
+.ticktick-tokens.json

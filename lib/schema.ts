@@ -69,6 +69,8 @@ export const events = pgTable(
     startTime: timestamp('start_time', { withTimezone: true }),
     endTime: timestamp('end_time', { withTimezone: true }),
     rawTitle: text('raw_title'),
+    /** Upstream version marker (TickTick `etag`); lets a sync skip unchanged rows. */
+    sourceEtag: text('source_etag'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -84,6 +86,27 @@ export const dailyOvertimeNotes = pgTable('daily_overtime_notes', {
   date: date('date', { mode: 'string' }).primaryKey(),
   note: text('note'),
   noteSource: text('note_source'),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * OAuth credentials for external integrations, keyed by provider (e.g. 'ticktick').
+ *
+ * Vercel functions have no persistent disk, so tokens cannot live in a file, and
+ * rotating refresh tokens cannot live in env vars. One row per provider.
+ */
+export const integrationTokens = pgTable('integration_tokens', {
+  provider: text('provider').primaryKey(),
+  accessToken: text('access_token').notNull(),
+  refreshToken: text('refresh_token'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  tokenType: text('token_type'),
+  scope: text('scope'),
+  /** From dynamic client registration; needed to refresh. */
+  clientId: text('client_id'),
+  clientSecret: text('client_secret'),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -110,3 +133,5 @@ export type InsertDailyOvertimeNotes = typeof dailyOvertimeNotes.$inferInsert;
 export type SelectDailyOvertimeNotes = typeof dailyOvertimeNotes.$inferSelect;
 export type InsertAppConfig = typeof appConfig.$inferInsert;
 export type SelectAppConfig = typeof appConfig.$inferSelect;
+export type InsertIntegrationTokens = typeof integrationTokens.$inferInsert;
+export type SelectIntegrationTokens = typeof integrationTokens.$inferSelect;

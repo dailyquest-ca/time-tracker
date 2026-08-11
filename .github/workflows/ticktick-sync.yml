@@ -1,0 +1,61 @@
+name: ticktick-sync
+
+# TickTick has no webhooks, so the sync polls. Vercel Hobby cron is daily-only,
+# and this repo is public so Actions minutes are free — hence the schedule lives
+# here and calls the cron route.
+on:
+  schedule:
+    # :03, :13, :23, ... — offset off the hour to avoid the scheduler pileup at :00.
+    - cron: '3-59/10 * * * *'
+  workflow_dispatch:
+
+# A run in flight is more useful than a queue of stale ones.
+concurrency:
+  group: ticktick-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger TickTick sync
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://time-tracker-cyan-tau.vercel.app' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET is not set in this repository's Actions secrets."
+            exit 1
+          fi
+
+          # Not using curl -f: it discards the body, and the body is the sync summary.
+          status=$(curl -sS -m 55 -o response.json -w '%{http_code}' \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/ticktick-sync")
+
+          echo "HTTP $status"
+          cat response.json || true
+          echo
+
+          if [ "$status" != "200" ]; then
+            echo "::error::TickTick sync failed with HTTP $status"
+            exit 1
+          fi
+
+          # TickTick issues no refresh token, so the access token eventually dies
+          # and only a human can renew it. Surface the countdown loudly.
+          token_state=$(grep -o '"tokenState":"[^"]*"' response.json | cut -d'"' -f4 || true)
+          days=$(grep -o '"tokenExpiresInDays":[-0-9]*' response.json | cut -d: -f2 || true)
+          if [ "$token_state" = "expiring_soon" ]; then
+            echo "::warning::TickTick access token expires in ${days} day(s). Run: npm run ticktick:spike && npm run ticktick:seed"
+          fi
+
+  # GitHub disables scheduled workflows after 60 days without repo activity.
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gautamkrishnar/keepalive-workflow@v2

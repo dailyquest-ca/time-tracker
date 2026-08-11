@@ -36,6 +36,40 @@ Track daily work hours from a single **Google Calendar** (your Work calendar). T
 - `CRON_SECRET` – Optional; set in Vercel and use as `Authorization: Bearer <CRON_SECRET>` for the cron job that renews the calendar watch and runs sync.
 - `DATABASE_URL` – Postgres connection string.
 
+## TickTick (WSBC folder)
+
+Scheduled work in the **WSBC** TickTick folder is tracked alongside calendar time.
+Each list in the folder becomes a category — the list's emoji is stripped, so
+`🤖ELAN` files under `ELAN`.
+
+> **Status: built, pending deploy.** Setup steps and the re-auth runbook are in
+> `docs/TICKTICK_POLLING.md`.
+
+TickTick is read from its **official MCP server** (`https://mcp.ticktick.com`)
+using a plain programmatic JSON-RPC client — no LLM is involved. TickTick has no
+webhooks, so a GitHub Action polls a cron route every ~10 minutes:
+
+```
+GitHub Action (*/10) → GET /api/cron/ticktick-sync (Bearer CRON_SECRET)
+                          → MCP client → https://mcp.ticktick.com
+                          → upsert events, recompute daily totals
+```
+
+Vercel Hobby cron is daily-only, which is why the schedule lives in a GitHub
+Action; the repo is public, so those minutes are free.
+
+What gets tracked:
+
+- Tasks with **both a start and a due time**. All-day and undated tasks are
+  skipped, matching how all-day calendar events are skipped.
+- **Completed tasks are kept.** Finished work is real time spent; it stays on its day.
+- Durations count toward daily hours and overtime, the same as calendar events.
+
+The Google Calendar pipeline is untouched and runs in parallel. Writes are
+additive and idempotent — events are keyed on `(source_type, source_id)` where
+`source_id` is the TickTick task id, so a re-run with no upstream change writes
+nothing.
+
 ## Real-time updates
 
 - When you sync or select your work calendar, the app creates a **watch** on that calendar. Google sends a POST to `/api/webhooks/google-calendar-v2` when events change; the app then syncs and recomputes daily totals. The old `/api/webhooks/google-calendar` path is kept as a legacy sink that acknowledges but ignores traffic from stale watch channels.
