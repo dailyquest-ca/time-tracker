@@ -161,17 +161,75 @@ class DbAuthProvider implements OAuthClientProvider {
   }
 }
 
-/** Parse an MCP tool result into JSON. Tools return their payload as text content. */
-function parseToolResult<T>(result: unknown): T {
-  const content = (result as { content?: Array<{ type: string; text?: string }> })?.content;
-  const text = content?.find((c) => c.type === 'text')?.text;
-  if (!text) return [] as unknown as T;
-  const parsed = JSON.parse(text) as { result?: T } | T;
-  // The TickTick server wraps payloads in { result: ... } for most tools.
-  if (parsed && typeof parsed === 'object' && 'result' in (parsed as object)) {
-    return (parsed as { result: T }).result;
+interface McpToolResult {
+  isError?: boolean;
+  structuredContent?: unknown;
+  content?: Array<{ type: string; text?: string }>;
+}
+
+/**
+ * Pull the payload out of an MCP tool result.
+ *
+ * Servers may answer with `structuredContent` (when the tool declares an output
+ * schema) or with JSON in a text block, and may or may not wrap the payload in
+ * `{ result: ... }`. Anything unexpected is raised as an error naming the tool,
+ * so a shape change is legible instead of surfacing as a downstream TypeError.
+ */
+export function parseToolResult<T>(result: unknown, toolName: string): T | undefined {
+  const r = result as McpToolResult | undefined;
+
+  if (r?.isError) {
+    const text = r.content?.find((c) => c.type === 'text')?.text;
+    throw new Error(`TickTick MCP tool "${toolName}" failed: ${text ?? 'unknown error'}`);
   }
-  return parsed as T;
+
+  let payload: unknown = r?.structuredContent;
+
+  if (payload === undefined) {
+    const text = r?.content?.find((c) => c.type === 'text')?.text;
+    if (!text) return undefined;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new Error(
+        `TickTick MCP tool "${toolName}" returned text that is not JSON.`,
+      );
+    }
+  }
+
+  if (
+    payload != null &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    'result' in payload
+  ) {
+    payload = (payload as { result: unknown }).result;
+  }
+
+  return payload as T;
+}
+
+/** Describe a value's shape without exposing its contents. */
+function describeShape(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  if (typeof value === 'object') {
+    return `object with keys [${Object.keys(value as object).join(', ')}]`;
+  }
+  return typeof value;
+}
+
+/**
+ * Assert a payload is a list. An absent payload is treated as empty; anything
+ * else is an error naming the tool and the shape received — never its contents,
+ * which are task data.
+ */
+export function expectArray<T>(value: unknown, toolName: string): T[] {
+  if (value === undefined) return [];
+  if (Array.isArray(value)) return value as T[];
+  throw new Error(
+    `TickTick MCP tool "${toolName}" returned ${describeShape(value)}, expected an array.`,
+  );
 }
 
 const REAUTH_HINT =
@@ -241,7 +299,10 @@ export class TickTickClient {
 
   async listProjects(): Promise<TickTickProject[]> {
     const result = await this.client.callTool({ name: 'list_projects', arguments: {} });
-    return parseToolResult<TickTickProject[]>(result) ?? [];
+    return expectArray<TickTickProject>(
+      parseToolResult(result, 'list_projects'),
+      'list_projects',
+    );
   }
 
   /**
@@ -267,7 +328,10 @@ export class TickTickClient {
         name: 'filter_tasks',
         arguments: { filter: { ...base, status: [0, 2] } },
       });
-      return parseToolResult<TickTickTask[]>(result) ?? [];
+      return expectArray<TickTickTask>(
+        parseToolResult(result, 'filter_tasks'),
+        'filter_tasks',
+      );
     } catch (err) {
       console.warn(
         `[ticktick] Combined status filter failed, falling back to separate calls: ${
@@ -282,7 +346,12 @@ export class TickTickClient {
         name: 'filter_tasks',
         arguments: { filter: { ...base, status: [status] } },
       });
-      byStatus.push(...(parseToolResult<TickTickTask[]>(result) ?? []));
+      byStatus.push(
+        ...expectArray<TickTickTask>(
+          parseToolResult(result, 'filter_tasks'),
+          'filter_tasks',
+        ),
+      );
     }
     return byStatus;
   }
