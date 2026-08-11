@@ -23,3 +23,6 @@ next-env.d.ts
 
 # drizzle (keep schema and migrations in repo; ignore generated cache if any)
 drizzle/migrations
+
+# claude code (keep shared settings + hooks; ignore per-machine permission grants)
+.claude/settings.local.json
