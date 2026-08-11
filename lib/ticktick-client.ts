@@ -43,6 +43,26 @@ function mcpUrl(): string {
 }
 
 /**
+ * An access token supplied directly as an env var, bypassing the database.
+ *
+ * TickTick issues no refresh token, so this token never rotates — which is the
+ * only reason an env var is a legitimate home for it. If TickTick ever starts
+ * issuing refresh tokens, move back to the table: env vars cannot be written at
+ * runtime, so a rotated token would be lost.
+ */
+export function envAccessToken(): string | null {
+  return process.env.TICKTICK_ACCESS_TOKEN?.trim() || null;
+}
+
+/**
+ * Optional companion to TICKTICK_ACCESS_TOKEN, so expiry warnings still work.
+ * Without it expiry is 'unknown' and the sync cannot warn before the token dies.
+ */
+function envTokenExpiresAt(): string | null {
+  return process.env.TICKTICK_TOKEN_EXPIRES_AT?.trim() || null;
+}
+
+/**
  * OAuth provider backed by `integration_tokens`. Read-mostly: the only write is
  * persisting refreshed (possibly rotated) tokens.
  */
@@ -72,6 +92,10 @@ class DbAuthProvider implements OAuthClientProvider {
   }
 
   async tokens(): Promise<OAuthTokens | undefined> {
+    const fromEnv = envAccessToken();
+    if (fromEnv) {
+      return { access_token: fromEnv, token_type: 'Bearer' } as OAuthTokens;
+    }
     const row = await this.row();
     if (!row) return undefined;
     return {
@@ -83,6 +107,15 @@ class DbAuthProvider implements OAuthClientProvider {
   }
 
   async saveTokens(tokens: OAuthTokens): Promise<void> {
+    if (envAccessToken()) {
+      // Env vars cannot be written at runtime. Harmless while TickTick issues no
+      // refresh token; if that changes, the env-var path must be abandoned.
+      console.warn(
+        '[ticktick] Ignoring refreshed tokens: TICKTICK_ACCESS_TOKEN is set, which cannot be updated at runtime.',
+      );
+      return;
+    }
+
     const expiresAt =
       typeof tokens.expires_in === 'number'
         ? new Date(Date.now() + tokens.expires_in * 1000)
@@ -153,20 +186,36 @@ export class TickTickClient {
   ) {}
 
   static async connect(): Promise<TickTickClient> {
-    const rows = await db
-      .select()
-      .from(integrationTokens)
-      .where(eq(integrationTokens.provider, PROVIDER))
-      .limit(1);
-    if (rows.length === 0) {
-      throw new TickTickNotConnectedError(
-        `No TickTick credentials stored. ${REAUTH_HINT}`,
-      );
+    // An env-var token skips the table entirely, so a deployment can run with no
+    // database seeding step at all.
+    const fromEnv = envAccessToken();
+    let storedExpiry: Date | string | null = null;
+
+    if (fromEnv) {
+      storedExpiry = envTokenExpiresAt();
+      if (!storedExpiry) {
+        console.warn(
+          '[ticktick] TICKTICK_ACCESS_TOKEN is set without TICKTICK_TOKEN_EXPIRES_AT — ' +
+            'expiry cannot be tracked, so the sync will stop without warning when the token dies.',
+        );
+      }
+    } else {
+      const rows = await db
+        .select()
+        .from(integrationTokens)
+        .where(eq(integrationTokens.provider, PROVIDER))
+        .limit(1);
+      if (rows.length === 0) {
+        throw new TickTickNotConnectedError(
+          `No TickTick credentials stored and TICKTICK_ACCESS_TOKEN is not set. ${REAUTH_HINT}`,
+        );
+      }
+      storedExpiry = rows[0].expiresAt;
     }
 
     // TickTick issues no refresh token, so an expired access token cannot be
     // renewed here. Say so plainly rather than surfacing an opaque 401.
-    const expiry = tokenExpiryStatus(rows[0].expiresAt, new Date());
+    const expiry = tokenExpiryStatus(storedExpiry, new Date());
     if (expiry.state === 'expired') {
       throw new TickTickNotConnectedError(
         `TickTick access token expired ${Math.abs(expiry.daysRemaining ?? 0)} day(s) ago ` +
