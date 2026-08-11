@@ -50,12 +50,6 @@ jobs:
             echo "::warning::TickTick access token expires in ${days} day(s). Run: npm run ticktick:spike && npm run ticktick:seed"
           fi
 
-  # GitHub disables scheduled workflows after 60 days without repo activity.
-  keepalive:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: gautamkrishnar/keepalive-workflow@v2
+# The keepalive that guards against GitHub's 60-day disable lives in its own
+# weekly workflow. It used to be a second job here, which meant a keepalive
+# problem showed up as a failed *sync* run — see .github/workflows/keepalive.yml.

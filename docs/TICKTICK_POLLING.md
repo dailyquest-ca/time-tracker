@@ -135,7 +135,8 @@ discussing it first.
 | `lib/ticktick-client.ts` | MCP client; OAuth backed by `integration_tokens` |
 | `lib/ticktick-sync.ts` | Window maths, upsert, etag skip, deletion reconciliation |
 | `app/api/cron/ticktick-sync/route.ts` | Bearer `CRON_SECRET` entrypoint |
-| `.github/workflows/ticktick-sync.yml` | `3-59/10 * * * *` schedule + keepalive |
+| `.github/workflows/ticktick-sync.yml` | `3-59/10 * * * *` schedule that calls the cron route |
+| `.github/workflows/keepalive.yml` | Weekly guard against GitHub's 60-day disable of idle schedules |
 | `drizzle/0007_ticktick_integration.sql` | `integration_tokens`, `events.source_etag`, `(source_type, date)` index |
 
 Only `integration_tokens` and `source_etag` were genuinely new — `events` already
