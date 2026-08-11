@@ -61,9 +61,3 @@ Migration scripts under `scripts/` are one-off and destructive by nature. Read o
 - **Two webhook streams, treated differently.** Trusted current-watch traffic goes to `/api/webhooks/google-calendar-v2` and syncs. Legacy and untrusted traffic goes to `/api/webhooks/google-calendar`, which always ACKs and never syncs. Do not merge them.
 - **`channels.stop` failures are recoverable.** A `403` or `404` when stopping a channel must not block creating a replacement watch.
 - **Sync is idempotent and retry-safe.** Google delivers at-least-once. Upsert by stable key; never delete-then-insert.
-
-## Cursor rules
-
-`.cursor/rules/` still exists and is what Cursor reads. Most of its content is now duplicated by the `dq-standard` plugin, so the two can drift. When a shared rule changes, change it in `claude-standards` and treat the `.cursor` copy as stale.
-
-`.cursor/rules/gcp-patterns.mdc` looks dead — it covers Cloud Run, Firestore, Pub/Sub, and Secret Manager, none of which appear in `package.json`. This repo uses the Google Calendar API but is hosted on Vercel. Worth deleting.
