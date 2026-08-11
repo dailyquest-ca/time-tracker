@@ -4,10 +4,12 @@ import {
   isTimedTask,
   listNameToCategory,
   selectIngestableItems,
+  selectFolderLists,
   taskDateKey,
   taskDurationMinutes,
   ticktickSourceId,
   todayInVancouver,
+  type TickTickProject,
   type TickTickTask,
 } from '@/lib/ticktick';
 
@@ -306,5 +308,62 @@ describe('selectIngestableItems', () => {
     const items = selectIngestableItems(lists, '2026-08-10');
     expect(items).toHaveLength(1);
     expect(items[0].categoryName).toBe('ELAN');
+  });
+});
+
+describe('selectFolderLists', () => {
+  const WSBC = '6a7a7032e42bdd11f74ff016';
+  const PERSONAL = '689428adebbd1c0000000876';
+
+  function project(overrides: Partial<TickTickProject> = {}): TickTickProject {
+    return {
+      id: '6a7a6ff28f08f1b21296dc98',
+      name: '🤖ELAN',
+      groupId: WSBC,
+      closed: null,
+      kind: 'TASK',
+      ...overrides,
+    };
+  }
+
+  it('selects a list in the target folder', () => {
+    expect(selectFolderLists([project()], WSBC)).toHaveLength(1);
+  });
+
+  it('excludes lists in a different folder', () => {
+    expect(
+      selectFolderLists([project({ groupId: PERSONAL })], WSBC),
+    ).toHaveLength(0);
+  });
+
+  it('excludes top-level lists with no folder', () => {
+    expect(selectFolderLists([project({ groupId: null })], WSBC)).toHaveLength(0);
+  });
+
+  it('excludes NOTE lists, which hold no trackable time', () => {
+    expect(selectFolderLists([project({ kind: 'NOTE' })], WSBC)).toHaveLength(0);
+  });
+
+  it('includes a list whose kind is absent, defaulting to a task list', () => {
+    expect(selectFolderLists([project({ kind: undefined })], WSBC)).toHaveLength(1);
+  });
+
+  it('excludes archived (closed) lists', () => {
+    expect(selectFolderLists([project({ closed: true })], WSBC)).toHaveLength(0);
+  });
+
+  it('picks up a newly added list without any code change', () => {
+    const lists = [
+      project(),
+      project({ id: 'new-list', name: '💳PIS Enhance' }),
+    ];
+    expect(selectFolderLists(lists, WSBC).map((l) => l.name)).toEqual([
+      '🤖ELAN',
+      '💳PIS Enhance',
+    ]);
+  });
+
+  it('returns an empty array when the folder has no lists', () => {
+    expect(selectFolderLists([project({ groupId: PERSONAL })], WSBC)).toEqual([]);
   });
 });

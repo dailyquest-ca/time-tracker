@@ -22,7 +22,9 @@
     "import-csv": "dotenv -e .env.local -- tsx scripts/import-csv-to-events.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "ticktick:spike": "tsx scripts/ticktick-mcp-spike.ts"
+    "ticktick:spike": "tsx scripts/ticktick-mcp-spike.ts",
+    "ticktick:seed": "dotenv -e .env.local -- tsx scripts/seed-ticktick-tokens.ts",
+    "db:migrate:ticktick": "dotenv -e .env.local -- tsx scripts/run-migration-0007.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

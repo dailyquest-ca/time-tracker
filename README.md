@@ -42,8 +42,8 @@ Scheduled work in the **WSBC** TickTick folder is tracked alongside calendar tim
 Each list in the folder becomes a category — the list's emoji is stripped, so
 `🤖ELAN` files under `ELAN`.
 
-> **Status: not yet live.** The design is agreed and gated on a headless OAuth
-> spike — see `docs/TICKTICK_POLLING.md`.
+> **Status: built, pending deploy.** Setup steps and the re-auth runbook are in
+> `docs/TICKTICK_POLLING.md`.
 
 TickTick is read from its **official MCP server** (`https://mcp.ticktick.com`)
 using a plain programmatic JSON-RPC client — no LLM is involved. TickTick has no

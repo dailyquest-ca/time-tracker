@@ -23,6 +23,9 @@ export interface TickTickTask {
   timeZone?: string | null;
   completedTime?: string | null;
   modifiedTime?: string | null;
+  /** Upstream version marker; changes on every modification. */
+  etag?: string | null;
+  kind?: string | null;
 }
 
 /** A list ("project") as returned by the TickTick MCP `list_projects`. */
@@ -99,6 +102,22 @@ export function ticktickSourceId(task: TickTickTask): string {
 /** Today's date (YYYY-MM-DD) in Vancouver time. */
 export function todayInVancouver(now: Date = new Date()): string {
   return now.toLocaleDateString('en-CA', { timeZone: TRACKING_TIME_ZONE });
+}
+
+/**
+ * Lists in a given TickTick folder that can hold trackable time.
+ *
+ * Selection is by folder membership rather than a hardcoded id table, so a list
+ * added to the folder later is synced with no code change. Note lists hold no
+ * time, and archived lists are historical.
+ */
+export function selectFolderLists(
+  projects: TickTickProject[],
+  folderId: string,
+): TickTickProject[] {
+  return projects.filter(
+    (p) => p.groupId === folderId && p.kind !== 'NOTE' && p.closed !== true,
+  );
 }
 
 /** One TickTick list plus the tasks the poller read from it. */

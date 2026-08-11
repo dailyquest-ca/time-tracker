@@ -1,7 +1,28 @@
 # TickTick → time tracker sync
 
-Status: **Phase 0 (gate) — not yet built.** The sync route, migration and workflow
-below are the agreed design; none of it ships until the OAuth spike passes.
+Status: **Built, pending deploy.** The Phase 0 gate passed on 2026-08-10 (headless
+run succeeded without a browser). Remaining work is operational — run the
+migration, seed the tokens, add the Actions secret.
+
+## Deploy checklist
+
+```bash
+# 1. Local: authorize once and prove headless refresh works
+npm run ticktick:spike
+npm run ticktick:spike -- --headless
+
+# 2. Create integration_tokens + events.source_etag
+npm run db:migrate:ticktick
+
+# 3. Copy the spike's credentials into the database
+npm run ticktick:seed
+```
+
+4. Add `CRON_SECRET` to the repo's **Actions secrets** (reuse the Vercel value).
+5. Optionally set an `APP_URL` Actions **variable**; the workflow falls back to
+   `https://time-tracker-cyan-tau.vercel.app`.
+6. Deploy, then trigger `ticktick-sync` manually from the Actions tab to confirm
+   a 200 and a sane summary before relying on the schedule.
 
 ## Design
 
@@ -87,17 +108,33 @@ discussing it first.
   re-run with `TICKTICK_SPIKE_NO_REFRESH_GRANT=1` to see whether a refresh token
   is issued anyway.
 
-## Phases after the gate
+## What was built
 
-1. **Migration** — only `integration_tokens` is genuinely new. `events` already
-   has `source_type` / `source_id` / `source_group` with a unique constraint on
-   `(source_type, source_id)`, so no discriminator migration is needed.
-2. **Sync route** — `app/api/cron/ticktick-sync/route.ts`, Bearer `CRON_SECRET`,
-   mirroring `app/api/cron/sync/route.ts`. Window `[now − LOOKBACK_DAYS, now + 2d]`.
-   Skip writes when the task `etag` is unchanged. Reconcile deletions inside the
-   window only. Recompute affected dates via `recomputeDailyTotalsForDates`.
-3. **GitHub Action** — `*/10`, offset off the hour, plus a keepalive job to dodge
-   the 60-day inactivity auto-disable on scheduled workflows.
+| File | Role |
+|---|---|
+| `lib/ticktick.ts` | Pure rules: folder selection, timed-task filter, Vancouver bucketing, list-name categories |
+| `lib/ticktick-client.ts` | MCP client; OAuth backed by `integration_tokens` |
+| `lib/ticktick-sync.ts` | Window maths, upsert, etag skip, deletion reconciliation |
+| `app/api/cron/ticktick-sync/route.ts` | Bearer `CRON_SECRET` entrypoint |
+| `.github/workflows/ticktick-sync.yml` | `3-59/10 * * * *` schedule + keepalive |
+| `drizzle/0007_ticktick_integration.sql` | `integration_tokens`, `events.source_etag`, `(source_type, date)` index |
+
+Only `integration_tokens` and `source_etag` were genuinely new — `events` already
+had `source_type` / `source_id` / `source_group` with a unique constraint on
+`(source_type, source_id)`, so no discriminator migration was needed.
+
+Each run reconciles `[now − LOOKBACK_DAYS, now + 2 days]`, clamped to the cutover
+date. Rows outside that window are frozen history and are never deleted.
+
+## Re-authorizing
+
+The sync route cannot open a browser. If the refresh token stops working it fails
+with `TickTickNotConnectedError`, and the fix is to re-run the spike locally and
+re-seed:
+
+```bash
+npm run ticktick:spike && npm run ticktick:seed
+```
 
 ## Environment
 
