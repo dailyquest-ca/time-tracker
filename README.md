@@ -36,6 +36,39 @@ Track daily work hours from a single **Google Calendar** (your Work calendar). T
 - `CRON_SECRET` – Optional; set in Vercel and use as `Authorization: Bearer <CRON_SECRET>` for the cron job that renews the calendar watch and runs sync.
 - `DATABASE_URL` – Postgres connection string.
 
+## TickTick (WSBC folder)
+
+Scheduled work in the **WSBC** TickTick folder is tracked alongside calendar time.
+Each list in the folder becomes a category — the list's emoji is stripped, so
+`🤖ELAN` files under `ELAN`.
+
+TickTick is read through the **TickTick MCP connector**, which is OAuth-bound to
+the owner's Claude account. That connector is reachable from a Claude session but
+**not** from this app's server runtime, so the polling loop is a scheduled Claude
+session rather than a Vercel cron:
+
+```
+Claude session (scheduled)
+  → reads the WSBC folder over the TickTick MCP
+  → POST /api/ingest/ticktick   (Authorization: Bearer $INGEST_SECRET)
+  → upserts into events, recomputes daily totals
+```
+
+What gets tracked:
+
+- Tasks with **both a start and a due time**, dated **today or later**. All-day and
+  undated tasks are skipped, matching how all-day calendar events are skipped.
+- **Completed tasks are kept.** Finished work is real time spent; it stays on its day.
+- Durations count toward daily hours and overtime, the same as calendar events.
+
+Writes are idempotent — events are keyed on `(source_type, source_id)` where
+`source_id` is the TickTick task id, so re-posting a batch updates in place. Pass
+`"prune": true` to drop items dated today or later that no longer exist upstream;
+past events are never pruned.
+
+Setup: set `INGEST_SECRET` in Vercel, then schedule the poller (see
+`docs/TICKTICK_POLLING.md`).
+
 ## Real-time updates
 
 - When you sync or select your work calendar, the app creates a **watch** on that calendar. Google sends a POST to `/api/webhooks/google-calendar-v2` when events change; the app then syncs and recomputes daily totals. The old `/api/webhooks/google-calendar` path is kept as a legacy sink that acknowledges but ignores traffic from stale watch channels.

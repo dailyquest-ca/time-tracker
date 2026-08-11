@@ -8,6 +8,7 @@ import {
   sumByCategory,
   parseHours,
   localDateKey,
+  eventSourceLabel,
 } from '../format';
 
 describe('fmtHours', () => {
@@ -138,5 +139,23 @@ describe('parseHours (shared)', () => {
 
   it('returns 0 for null', () => {
     expect(parseHours(null)).toBe(0);
+  });
+});
+
+describe('eventSourceLabel', () => {
+  it('labels Google Calendar events', () => {
+    expect(eventSourceLabel('google')).toBe('google_calendar');
+  });
+
+  it('labels TickTick events', () => {
+    expect(eventSourceLabel('ticktick')).toBe('ticktick');
+  });
+
+  it('labels manually created events', () => {
+    expect(eventSourceLabel('manual')).toBe('manual');
+  });
+
+  it('falls back to manual for an unknown source type', () => {
+    expect(eventSourceLabel('something-else')).toBe('manual');
   });
 });

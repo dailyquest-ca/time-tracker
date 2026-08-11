@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { categories, dailyOvertimeNotes, events } from '@/lib/schema';
-import { parseHours } from '@/lib/format';
+import { eventSourceLabel, parseHours } from '@/lib/format';
 import { generateOvertimeNoteFromContext } from '@/lib/ai-note';
 import { getDailyTotalsInRange } from '@/lib/overtime';
 import { isBCWorkDay } from '@/lib/workdays-bc';
@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
           category: cat,
           projectName: null as string | null,
           durationMinutes,
-          source: e.sourceType === 'google' ? 'google_calendar' : 'manual',
+          source: eventSourceLabel(e.sourceType),
           startTime,
         };
       })
