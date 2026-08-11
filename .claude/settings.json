@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "daily-quest": {
+      "source": {
+        "source": "github",
+        "repo": "dailyquest-ca/claude-standards"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "dq-standard@daily-quest": true
+  }
+}
