@@ -42,15 +42,15 @@ Scheduled work in the **WSBC** TickTick folder is tracked alongside calendar tim
 Each list in the folder becomes a category — the list's emoji is stripped, so
 `🤖ELAN` files under `ELAN`.
 
-> **Status: built, pending deploy.** Setup steps and the re-auth runbook are in
+> **Status: live.** Setup steps and the re-auth runbook are in
 > `docs/TICKTICK_POLLING.md`.
 
 TickTick is read from its **official MCP server** (`https://mcp.ticktick.com`)
 using a plain programmatic JSON-RPC client — no LLM is involved. TickTick has no
-webhooks, so a GitHub Action polls a cron route every ~10 minutes:
+webhooks, so a GitHub Action polls a cron route hourly:
 
 ```
-GitHub Action (*/10) → GET /api/cron/ticktick-sync (Bearer CRON_SECRET)
+GitHub Action (hourly) → GET /api/cron/ticktick-sync (Bearer CRON_SECRET)
                           → MCP client → https://mcp.ticktick.com
                           → upsert events, recompute daily totals
 ```
