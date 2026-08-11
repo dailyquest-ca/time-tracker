@@ -1,0 +1,43 @@
+name: keepalive
+
+# GitHub disables scheduled workflows after 60 days without repository activity.
+# That would silently stop ticktick-sync, and a time tracker going quiet for two
+# months is exactly the kind of tool nobody notices has stopped — the gap only
+# shows up later as a hole in the overtime ledger.
+#
+# This used to be a job inside ticktick-sync built on
+# gautamkrishnar/keepalive-workflow. GitHub Staff disabled that repository for a
+# terms-of-service violation, so the job began failing on every scheduled run and
+# marked the whole sync red. Nothing here depends on a third-party action, and
+# lib/__tests__/workflows.test.ts keeps it that way.
+on:
+  schedule:
+    # Weekly, off the hour. A 60-day deadline does not need a tighter loop, and
+    # the 45-day threshold below leaves room for two attempts before the cutoff.
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Push an empty commit once the repo has been quiet too long
+        run: |
+          # checkout@v4 is shallow by default, so HEAD is the only commit needed.
+          quiet_days=$(( ( $(date -u +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          echo "Last commit: ${quiet_days} day(s) ago."
+
+          if [ "$quiet_days" -lt 45 ]; then
+            echo "Under the 45-day threshold — schedules are in no danger."
+            exit 0
+          fi
+
+          echo "::warning::Repo quiet for ${quiet_days} days; pushing a keepalive commit so scheduled workflows stay enabled."
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit --allow-empty -m 'chore: keepalive commit to keep scheduled workflows enabled'
+          git push

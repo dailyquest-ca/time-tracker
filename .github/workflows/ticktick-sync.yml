@@ -5,8 +5,14 @@ name: ticktick-sync
 # here and calls the cron route.
 on:
   schedule:
-    # :03, :13, :23, ... — offset off the hour to avoid the scheduler pileup at :00.
-    - cron: '3-59/10 * * * *'
+    # Hourly at :23 — off the hour to avoid the scheduler pileup at :00.
+    #
+    # This asked for every 10 minutes until 2026-08-11. GitHub delivered 9 runs
+    # in the 8.6 hours after the schedule went live, against the ~51 it implied:
+    # an average gap of 65 minutes. The tighter cron bought nothing and only made
+    # the workflow describe a cadence it never got. Each run reconciles a 7-day
+    # lookback (TICKTICK_LOOKBACK_DAYS), so hourly cannot miss a task either way.
+    - cron: '23 * * * *'
   workflow_dispatch:
 
 # A run in flight is more useful than a queue of stale ones.
@@ -50,12 +56,6 @@ jobs:
             echo "::warning::TickTick access token expires in ${days} day(s). Run: npm run ticktick:spike && npm run ticktick:seed"
           fi
 
-  # GitHub disables scheduled workflows after 60 days without repo activity.
-  keepalive:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: gautamkrishnar/keepalive-workflow@v2
+# The keepalive that guards against GitHub's 60-day disable lives in its own
+# weekly workflow. It used to be a second job here, which meant a keepalive
+# problem showed up as a failed *sync* run — see .github/workflows/keepalive.yml.
