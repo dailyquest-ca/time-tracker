@@ -14,6 +14,7 @@ import { getOrCreateCategoryByName } from './categories';
 import { roundToNearest15 } from './google-calendar-sync';
 import { recomputeDailyTotalsForDates } from './overtime';
 import { events as eventsTable } from './schema';
+import { ensureTickTickSchema } from './ticktick-migrate';
 import { TickTickClient, TickTickNotConnectedError } from './ticktick-client';
 import {
   selectFolderLists,
@@ -129,6 +130,16 @@ export function groupTasksByList(
 }
 
 export async function runTickTickSync(): Promise<TickTickSyncResult> {
+  // Applied here rather than by a deploy hook so the sync works on a database
+  // the operator has no local access to. Idempotent and once per process.
+  try {
+    await ensureTickTickSchema();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[ticktick-sync] Schema check failed: ${message}`);
+    return { ok: false, error: `Schema check failed: ${message}` };
+  }
+
   let client: TickTickClient;
   try {
     client = await TickTickClient.connect();

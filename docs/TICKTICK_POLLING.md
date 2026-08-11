@@ -6,23 +6,42 @@ migration, seed the tokens, add the Actions secret.
 
 ## Deploy checklist
 
+Two routes. Both need the spike run once locally to obtain a token.
+
+### A. No local database access (fewest steps)
+
+The sync applies its own schema and reads the token from an env var, so nothing
+here needs a local `DATABASE_URL` or `.env.local`.
+
+1. In **Vercel → Environment Variables**, set:
+   - `TICKTICK_ACCESS_TOKEN` — `tokens.access_token` from `.ticktick-tokens.json`
+   - `TICKTICK_TOKEN_EXPIRES_AT` — ISO expiry, e.g. `2027-02-06T00:00:00Z`
+2. Add `CRON_SECRET` to the repo's **Actions secrets** (reuse the Vercel value).
+3. Redeploy, then run `ticktick-sync` from the Actions tab via
+   **workflow_dispatch**.
+
+The first run creates `integration_tokens`, adds `events.source_etag` and the
+`(source_type, date)` index.
+
+### B. Conventional migration
+
 ```bash
-# 1. Local: authorize once and prove headless refresh works
-npm run ticktick:spike
-npm run ticktick:spike -- --headless
-
-# 2. Create integration_tokens + events.source_etag
-npm run db:migrate:ticktick
-
-# 3. Copy the spike's credentials into the database
-npm run ticktick:seed
+npm run db:migrate:ticktick   # integration_tokens + events.source_etag
+npm run ticktick:seed         # copy spike credentials into the database
 ```
 
-4. Add `CRON_SECRET` to the repo's **Actions secrets** (reuse the Vercel value).
-5. Optionally set an `APP_URL` Actions **variable**; the workflow falls back to
-   `https://time-tracker-cyan-tau.vercel.app`.
-6. Deploy, then trigger `ticktick-sync` manually from the Actions tab to confirm
-   a 200 and a sane summary before relying on the schedule.
+Then add `CRON_SECRET` as above. Leave `TICKTICK_ACCESS_TOKEN` unset so the
+table is used.
+
+Optionally set an `APP_URL` Actions **variable**; the workflow falls back to
+`https://time-tracker-cyan-tau.vercel.app`.
+
+### Which to prefer
+
+Route A if you want the deployment self-contained. Route B keeps DDL off the
+request path and is the better home for the token if TickTick ever starts
+issuing refresh tokens — env vars cannot be written at runtime, so a rotated
+token would be lost.
 
 ## Design
 
